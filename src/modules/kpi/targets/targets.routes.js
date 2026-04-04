@@ -1,21 +1,24 @@
 import express from "express";
 import * as controller from "./targets.controller.js";
-import { authenticate, authorize } from "../../../middlewares/auth.middleware.js";
-
-/**
- * KPI Target Routes
- * Handles individual and team target logic with RBAC.
- */
+import authMiddleware from "../../../shared/middlewares/authMiddleware.js";
+import roleGuard from "../../../shared/middlewares/roleGuard.js";
 
 const router = express.Router();
 
-// Individual Targets
-router.get("/:executiveId", authenticate, controller.getTargets);
-router.post("/", authenticate, authorize("KPI Manager", "KPI Admin"), controller.createTarget);
-router.post("/approve", authenticate, authorize("KPI Manager", "KPI Admin"), controller.approveTargets);
+/**
+ * Routes: KPI Target Management
+ * Roles: Admin (Full), Manager (Team CRUD), Executive (Own View)
+ */
 
-// Team Targets
-router.get("/team/:teamId", authenticate, controller.getTeamTargets);
-router.post("/team/override", authenticate, authorize("KPI Manager", "KPI Admin"), controller.overrideTeamTarget);
+// View Targets (All authenticated users can see available targets)
+router.get("/executive/:executiveId/period/:periodId", authMiddleware, controller.getTargets);
+router.get("/team/:teamId/period/:periodId", authMiddleware, controller.getTeamTargets);
+
+// Set/Update Targets (Admin or Manager only)
+router.post("/", authMiddleware, roleGuard(["KPI Admin", "KPI Manager"]), controller.setTarget);
+router.post("/bulk", authMiddleware, roleGuard(["KPI Admin", "KPI Manager"]), controller.setBulkTargets);
+
+// Team Override (Admin or Manager only)
+router.post("/override", authMiddleware, roleGuard(["KPI Admin", "KPI Manager"]), controller.overrideTeamTarget);
 
 export default router;

@@ -1,14 +1,21 @@
 import express from "express";
 import * as controller from "./periods.controller.js";
-import { authenticate } from "../../../middlewares/auth.middleware.js";
-
-/**
- * KPI Period Routes
- * Managed within the modular KPI sub-system.
- */
+import authMiddleware from "../../../shared/middlewares/authMiddleware.js";
+import roleGuard from "../../../shared/middlewares/roleGuard.js";
 
 const router = express.Router();
 
-router.get("/", authenticate, controller.getPeriods);
+/**
+ * Routes: KPI Period Management
+ * Roles: Admin (Full), Manager/Executive (View)
+ */
+
+router.get("/", authMiddleware, controller.getAllPeriods);
+router.get("/:id", authMiddleware, controller.getPeriodById);
+
+// Admin can create, approve, or reject periods
+router.post("/", authMiddleware, roleGuard(["KPI Admin"]), controller.createPeriod);
+router.post("/:id/approve", authMiddleware, roleGuard(["KPI Admin"]), controller.approvePeriod);
+router.post("/:id/reject", authMiddleware, roleGuard(["KPI Admin"]), controller.rejectPeriod);
 
 export default router;

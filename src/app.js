@@ -39,7 +39,7 @@ app.use("/auth", authModule.router);
 app.use("/kpi", kpiModule.router);
 
 // 404 Handler
-app.use((req, res) => {
+app.use((_req, res) => {
   return error(res, "Resource not found", null, 404);
 });
 
