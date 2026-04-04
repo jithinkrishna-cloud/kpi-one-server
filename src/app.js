@@ -50,7 +50,7 @@ app.listen(PORT, async () => {
   🚀 KPI Backend is running! (ESM Mode)
   📡 Port: ${PORT}
   🌍 Environment: ${process.env.NODE_ENV}
-  🔗 Health Check: http://localhost:${PORT}/api/health
+  🔗 Health Check: http://localhost:${PORT}/health
   `);
 
   try {

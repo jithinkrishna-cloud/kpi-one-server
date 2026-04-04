@@ -27,10 +27,20 @@ export const login = async (req, res) => {
 
     // 🚀 IMMEDIATE SYNC: Populate the local cache using the data from the login response.
     // This allows the KPI module to have full role/permission metadata instantly.
-    const { user } = response.data;
+    const { user, token } = response.data;
     if (user) {
       syncFromLoginResponse(user).catch(err => {
         console.error('⚠️ Background Profile Sync Failed:', err.message);
+      });
+    }
+
+    // 🍪 SET COOKIE: Store the token in an httpOnly cookie for better security.
+    if (token) {
+      res.cookie('token', token, {
+        httpOnly: true, // Prevents XSS access to the token
+        secure: process.env.NODE_ENV === 'production', // Only send over HTTPS in production
+        sameSite: 'strict', // Strong CSRF protection
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
       });
     }
 
@@ -45,4 +55,17 @@ export const login = async (req, res) => {
     
     return error(res, message, err.response?.data || null, statusCode);
   }
+};
+
+/**
+ * Logout - Clears the authentication token cookie.
+ */
+export const logout = (req, res) => {
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict'
+  });
+  
+  return success(res, 'Logout successful');
 };

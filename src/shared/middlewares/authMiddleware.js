@@ -24,13 +24,19 @@ const mapRole = (oneRole) => {
 
 const authMiddleware = async (req, res, next) => {
   try {
+    let token;
     const authHeader = req.headers.authorization;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return error(res, 'Authorization token is required', null, 401);
+    // Check for token in Authorization header (standard) or cookies (new)
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+    } else if (req.cookies && req.cookies.token) {
+      token = req.cookies.token;
     }
 
-    const token = authHeader.split(' ')[1];
+    if (!token) {
+      return error(res, 'Authorization token is required (header or cookie)', null, 401);
+    }
     let userId;
 
     // --- STEP 1: TOKEN VERIFICATION (Local Shared Secret) ---
