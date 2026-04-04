@@ -1,37 +1,39 @@
-import axios from 'axios';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import axios from "axios";
+import jwt from "jsonwebtoken";
+import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.join(__dirname, '..', '..', 'config', '.env') });
+dotenv.config({ path: path.join(__dirname, "..", "..", "config", ".env") });
 
 const baseUrl = process.env.ONE_API_BASE_URL;
-const verifyUrl = `${baseUrl}/auth/verify`;
 
 /**
- * Verifies the JWT token with ONE CRM
+ * Verifies the JWT token locally using the shared ONE_JWT_SECRET
  * @param {string} token - The Bearer token from the request
- * @returns {Promise<Object>} - User details including role, team, and franchisee
+ * @returns {Promise<Object>} - Decoded JWT payload
  */
 export const verifyToken = async (token) => {
   try {
-    const response = await axios.get(verifyUrl, {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    });
-
-    // Assuming ONE API returns { success: true, user: { id, role, teamId, franchiseeId, ... } }
-    if (response.data && (response.data.success || response.status === 200)) {
-      return response.data.user || response.data;
+    const secret = process.env.ONE_JWT_SECRET;
+    if (!secret) {
+      throw new Error("ONE_JWT_SECRET is not defined in .env");
     }
-    
-    throw new Error('Token verification failed at ONE CRM');
+
+    // Verify the token locally
+    const decoded = jwt.verify(token, secret);
+
+    // CRM Tokens usually have userId or id. Standardizing to common fields.
+    return {
+      ...decoded,
+      id: decoded.userId || decoded.id,
+      username: decoded.username || decoded.name,
+    };
   } catch (error) {
-    console.error('ONE API Verification Error:', error.response?.data || error.message);
-    throw new Error(error.response?.data?.message || 'Unauthorized: Token verification failed');
+    console.error("Local Token Verification Error:", error.message);
+    throw new Error("Unauthorized: Token verification failed");
   }
 };
 
@@ -44,13 +46,16 @@ export const getEmployeeById = async (employeeId, token) => {
   try {
     const response = await axios.get(`${baseUrl}/employees/${employeeId}`, {
       headers: {
-        Authorization: `Bearer ${token}`
-      }
+        Authorization: `Bearer ${token}`,
+      },
     });
 
     return response.data;
   } catch (error) {
-    console.error('ONE API Employee Fetch Error:', error.response?.data || error.message);
+    console.error(
+      "ONE API Employee Fetch Error:",
+      error.response?.data || error.message,
+    );
     return null;
   }
 };
