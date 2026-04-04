@@ -43,8 +43,17 @@ app.use((_req, res) => {
   return error(res, "Resource not found", null, 404);
 });
 
+import fs from "fs";
+
+// ... (existing imports) ...
+
 // Global Error Handler
-app.use(errorHandler);
+app.use((err, req, res, next) => {
+  const errorLog = `[${new Date().toISOString()}] ${err.stack}\n---\n`;
+  fs.appendFileSync(path.join(__dirname, "..", "error.log"), errorLog);
+  console.error("🔥 Global Error Caught:", err.message);
+  return error(res, err.message || "Internal Server Error", null, 500);
+});
 
 // Start Server
 app.listen(PORT, async () => {

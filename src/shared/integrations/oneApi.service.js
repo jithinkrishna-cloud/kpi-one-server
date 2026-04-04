@@ -12,14 +12,24 @@ dotenv.config({ path: path.join(__dirname, "..", "..", "config", ".env") });
 const baseUrl = process.env.ONE_API_BASE_URL;
 
 const ENDPOINTS = {
-  EMPLOYEES: "/api/employees",
-  TEAMS: "/api/teams",
-  ROLES: "/api/roles",
-  LEADS: "/api/leads",
-  DEALS: "/api/deals",
-  QUOTES: "/api/quotes",
-  ORDERS: "/api/orders",
-  SERVICES: "/api/services",
+  // Identity & Org
+  EMPLOYEES: "/getEmployees",
+  EMPLOYEE_DETAIL: "/getEmployeeById",
+  SALES_EMPLOYEES: "/sales-employees",
+  TEAMS: "/getTeams",
+  ROLES: "/filterEmployeesByRole",
+
+  // Leads (Phase F12-B)
+  LEADS: "/lead-generation/getleads",
+  LEAD_STATS: "/lead-generation/lead-stats",
+
+  // Revenue (Phase F12-B)
+  DEALS: "/getdeals",
+  DEAL_WIDGETS: "/getwidgets",
+  ORDERS: "/orderlist",
+  ORDER_METRICS: "/ordermetrics",
+
+  // Activity Feed
   CALLYSER: "/api/callyser/calls",
   INTERAKT: "/api/interakt/messages",
 };
@@ -69,50 +79,56 @@ export const oneApiRequest = async (endpoint, options = {}, token = null) => {
     },
   };
 
-  return withRetry(async () => {
-    const response = await axios(config);
-    return response.data;
-  }, 2); // 2 retries (total 3 attempts)
+  try {
+    return await withRetry(async () => {
+      const response = await axios(config);
+      return response.data;
+    }, 2);
+  } catch (error) {
+    console.error(
+      `❌ ONE API Error [${options.method || "GET"}] ${url}:`,
+      error.message,
+    );
+    throw error;
+  }
 };
-
 
 /**
  * Domain-Specific Wrappers
  */
 
 // Employee/Org
-export const getEmployees = (params, token) => 
+export const getEmployees = (params, token) =>
   oneApiRequest(ENDPOINTS.EMPLOYEES, { method: "GET", params }, token);
 
-export const getEmployeeById = (id, token) => 
-  oneApiRequest(`${ENDPOINTS.EMPLOYEES}/${id}`, { method: "GET" }, token);
+export const getEmployeeById = (id, token) =>
+  oneApiRequest(`${ENDPOINTS.EMPLOYEE_DETAIL}/${id}`, { method: "GET" }, token);
 
-export const getTeams = (params, token) => 
+export const getTeams = (params, token) =>
   oneApiRequest(ENDPOINTS.TEAMS, { method: "GET", params }, token);
 
-export const getRoles = (params, token) => 
-  oneApiRequest(ENDPOINTS.ROLES, { method: "GET", params }, token);
+export const getSalesEmployees = (params, token) =>
+  oneApiRequest(ENDPOINTS.SALES_EMPLOYEES, { method: "GET", params }, token);
+
+export const getRoles = (data, token) =>
+  oneApiRequest(ENDPOINTS.ROLES, { method: "POST", data }, token);
 
 // Sales/KPIs
-export const getLeads = (params, token) => 
-  oneApiRequest(ENDPOINTS.LEADS, { method: "GET", params }, token);
+export const getLeads = (data, token) =>
+  oneApiRequest(ENDPOINTS.LEADS, { method: "POST", data }, token);
 
-export const getDeals = (params, token) => 
-  oneApiRequest(ENDPOINTS.DEALS, { method: "GET", params }, token);
+export const getDeals = (data, token) =>
+  oneApiRequest(ENDPOINTS.DEALS, { method: "POST", data }, token);
 
-export const getQuotes = (params, token) => 
-  oneApiRequest(ENDPOINTS.QUOTES, { method: "GET", params }, token);
+export const getOrders = (data, token) =>
+  oneApiRequest(ENDPOINTS.ORDERS, { method: "POST", data }, token);
 
-export const getOrders = (params, token) => 
-  oneApiRequest(ENDPOINTS.ORDERS, { method: "GET", params }, token);
+export const getOrderMetrics = (token) =>
+  oneApiRequest(ENDPOINTS.ORDER_METRICS, { method: "GET" }, token);
 
 // Engagement/Communications
-export const getServices = (params, token) => 
-  oneApiRequest(ENDPOINTS.SERVICES, { method: "GET", params }, token);
-
-export const getCallLogs = (params, token) => 
+export const getCallLogs = (params, token) =>
   oneApiRequest(ENDPOINTS.CALLYSER, { method: "GET", params }, token);
 
-export const getMessageLogs = (params, token) => 
+export const getMessageLogs = (params, token) =>
   oneApiRequest(ENDPOINTS.INTERAKT, { method: "GET", params }, token);
-

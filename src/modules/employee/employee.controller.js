@@ -1,4 +1,4 @@
-import { refreshCache } from './employee.service.js';
+import { refreshCache, listEmployees } from './employee.service.js';
 import { success, error } from '../../shared/utils/response.js';
 
 /**
@@ -23,4 +23,22 @@ export const syncProfile = async (req, res) => {
  */
 export const getProfile = async (req, res) => {
   return success(res, 'Current profile retrieved', req.user);
+};
+
+/**
+ * Returns a list of employees based on filters and RBAC scope
+ */
+export const getEmployees = async (req, res) => {
+  try {
+    const filters = {
+      role: req.query.role,
+      teamId: req.query.teamId,
+      franchiseeId: req.query.franchiseeId
+    };
+
+    const employees = await listEmployees(filters, req.user);
+    return success(res, 'Employees retrieved successfully', employees);
+  } catch (err) {
+    return error(res, err.message, null, 500);
+  }
 };

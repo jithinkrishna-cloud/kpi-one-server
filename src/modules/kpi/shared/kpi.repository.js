@@ -32,29 +32,33 @@ export const lockPeriodForUpdate = async (connection, id) => {
 
 // --- Periods ---
 
-export const createPeriod = async (period) => {
+export const createPeriod = async (period, connection = null) => {
+    const db = connection || getPool();
     const { name, start_date, end_date, type, status } = period;
-    const [result] = await getPool().query(
+    const [result] = await db.query(
         "INSERT INTO kpi_periods (name, start_date, end_date, type, status) VALUES (?, ?, ?, ?, ?)",
         [name, start_date, end_date, type, status || "draft"]
     );
     return result.insertId;
 };
 
-export const updatePeriodStatus = async (id, status, approvedBy = null, rejectionReason = null) => {
-    await getPool().query(
+export const updatePeriodStatus = async (id, status, approvedBy = null, rejectionReason = null, connection = null) => {
+    const db = connection || getPool();
+    await db.query(
         "UPDATE kpi_periods SET status = ?, approved_by = ?, rejection_reason = ? WHERE id = ?",
         [status, approvedBy, rejectionReason, id]
     );
 };
 
-export const getPeriods = async () => {
-    const [rows] = await getPool().query("SELECT * FROM kpi_periods ORDER BY start_date DESC");
+export const getPeriods = async (connection = null) => {
+    const db = connection || getPool();
+    const [rows] = await db.query("SELECT * FROM kpi_periods ORDER BY start_date DESC");
     return rows;
 };
 
-export const countTargetsByPeriod = async (periodId) => {
-    const [rows] = await getPool().query(
+export const countTargetsByPeriod = async (periodId, connection = null) => {
+    const db = connection || getPool();
+    const [rows] = await db.query(
         "SELECT COUNT(*) as count FROM kpi_targets WHERE period_id = ?",
         [periodId]
     );
@@ -70,7 +74,7 @@ export const upsertTarget = async (target, connection = null) => {
         benchmark_value, ceiling_value, set_by, revision_history 
     } = target;
     
-    return await db.query(`
+    const [result] = await db.query(`
         INSERT INTO kpi_targets 
         (executive_id, period_id, kpi_code, target_value, benchmark_value, ceiling_value, set_by, revision_history)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -83,6 +87,7 @@ export const upsertTarget = async (target, connection = null) => {
         executive_id, period_id, kpi_code, target_value, 
         benchmark_value || null, ceiling_value || null, set_by, JSON.stringify(revision_history)
     ]);
+    return result;
 };
 
 export const batchInsertTargets = async (targets, connection) => {
@@ -104,11 +109,13 @@ export const batchInsertTargets = async (targets, connection) => {
         t.benchmark_value || null, t.ceiling_value || null, t.set_by, JSON.stringify(t.revision_history)
     ]);
 
-    return await connection.query(query, [values]);
+    const [result] = await connection.query(query, [values]);
+    return result;
 };
 
-export const getTargetsByExecutive = async (executiveId, periodId) => {
-    const [rows] = await getPool().query(
+export const getTargetsByExecutive = async (executiveId, periodId, connection = null) => {
+    const db = connection || getPool();
+    const [rows] = await db.query(
         "SELECT * FROM kpi_targets WHERE executive_id = ? AND period_id = ?",
         [executiveId, periodId]
     );
@@ -121,7 +128,7 @@ export const upsertTeamTarget = async (teamTarget, connection = null) => {
     const db = connection || getPool();
     const { team_id, period_id, kpi_code, auto_sum, override_value, override_by, reason, revision_history } = teamTarget;
 
-    return await db.query(`
+    const [result] = await db.query(`
         INSERT INTO kpi_team_targets 
         (team_id, period_id, kpi_code, auto_sum, override_value, override_by, reason, final_value, revision_history)
         VALUES (?, ?, ?, ?, ?, ?, ?, 
@@ -141,10 +148,12 @@ export const upsertTeamTarget = async (teamTarget, connection = null) => {
         team_id, period_id, kpi_code, auto_sum, override_value, override_by, reason, 
         override_value, override_value, auto_sum, JSON.stringify(revision_history)
     ]);
+    return result;
 };
 
-export const getTeamTargetsByPeriod = async (teamId, periodId) => {
-    const [rows] = await getPool().query(
+export const getTeamTargetsByPeriod = async (teamId, periodId, connection = null) => {
+    const db = connection || getPool();
+    const [rows] = await db.query(
         "SELECT * FROM kpi_team_targets WHERE team_id = ? AND period_id = ?",
         [teamId, periodId]
     );
@@ -195,8 +204,9 @@ export const logKpiAudit = async (audit, connection = null) => {
 
 // --- Metadata & Helpers ---
 
-export const getKpiMaster = async () => {
-    const [rows] = await getPool().query("SELECT * FROM kpi_master");
+export const getKpiMaster = async (connection = null) => {
+    const db = connection || getPool();
+    const [rows] = await db.query("SELECT * FROM kpi_master");
     return rows;
 };
 
