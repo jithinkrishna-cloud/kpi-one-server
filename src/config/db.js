@@ -28,4 +28,6 @@ export const checkDbConnection = async () => {
   }
 };
 
+export const getPool = () => db;
+
 export default db;
