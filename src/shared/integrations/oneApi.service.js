@@ -3,12 +3,26 @@ import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import { withRetry } from "../utils/retry.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, "..", "..", "config", ".env") });
 
 const baseUrl = process.env.ONE_API_BASE_URL;
+
+const ENDPOINTS = {
+  EMPLOYEES: "/employees",
+  TEAMS: "/teams",
+  ROLES: "/roles",
+  LEADS: "/leads",
+  DEALS: "/deals",
+  QUOTES: "/quotes",
+  ORDERS: "/orders",
+  SERVICES: "/services",
+  CALLS: "/calls",
+  MESSAGES: "/messages",
+};
 
 /**
  * Verifies the JWT token locally using the shared ONE_JWT_SECRET
@@ -38,24 +52,65 @@ export const verifyToken = async (token) => {
 };
 
 /**
- * Fetches full employee details from ONE CRM
- * @param {string} employeeId - ONE CRM internal ID
- * @param {string} token - Bearer token for auth
+ * Generic request handler for ONE CRM APIs with retry logic.
+ * @param {string} endpoint - Relative path (e.g., /leads)
+ * @param {Object} options - axios options (headers, params, data, method)
+ * @param {string} token - Bearer token
+ * @returns {Promise<any>}
  */
-export const getEmployeeById = async (employeeId, token) => {
-  try {
-    const response = await axios.get(`${baseUrl}/employees/${employeeId}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+export const oneApiRequest = async (endpoint, options = {}, token = null) => {
+  const url = `${baseUrl}${endpoint}`;
+  const config = {
+    ...options,
+    url,
+    headers: {
+      ...options.headers,
+      ...(token && { Authorization: `Bearer ${token}` }),
+    },
+  };
 
+  return withRetry(async () => {
+    const response = await axios(config);
     return response.data;
-  } catch (error) {
-    console.error(
-      "ONE API Employee Fetch Error:",
-      error.response?.data || error.message,
-    );
-    return null;
-  }
+  }, 2); // 2 retries (total 3 attempts)
 };
+
+/**
+ * Domain-Specific Wrappers
+ */
+
+// Employee/Org
+export const getEmployees = (params, token) => 
+  oneApiRequest(ENDPOINTS.EMPLOYEES, { method: "GET", params }, token);
+
+export const getEmployeeById = (id, token) => 
+  oneApiRequest(`${ENDPOINTS.EMPLOYEES}/${id}`, { method: "GET" }, token);
+
+export const getTeams = (params, token) => 
+  oneApiRequest(ENDPOINTS.TEAMS, { method: "GET", params }, token);
+
+export const getRoles = (params, token) => 
+  oneApiRequest(ENDPOINTS.ROLES, { method: "GET", params }, token);
+
+// Sales
+export const getLeads = (params, token) => 
+  oneApiRequest(ENDPOINTS.LEADS, { method: "GET", params }, token);
+
+export const getDeals = (params, token) => 
+  oneApiRequest(ENDPOINTS.DEALS, { method: "GET", params }, token);
+
+export const getQuotes = (params, token) => 
+  oneApiRequest(ENDPOINTS.QUOTES, { method: "GET", params }, token);
+
+export const getOrders = (params, token) => 
+  oneApiRequest(ENDPOINTS.ORDERS, { method: "GET", params }, token);
+
+// Engagement
+export const getServices = (params, token) => 
+  oneApiRequest(ENDPOINTS.SERVICES, { method: "GET", params }, token);
+
+export const getCalls = (params, token) => 
+  oneApiRequest(ENDPOINTS.CALLS, { method: "GET", params }, token);
+
+export const getMessages = (params, token) => 
+  oneApiRequest(ENDPOINTS.MESSAGES, { method: "GET", params }, token);
