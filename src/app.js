@@ -14,6 +14,7 @@ import { error } from "./shared/utils/response.js";
 import healthModule from "./modules/health/index.js";
 import employeeModule from "./modules/employee/index.js";
 import authModule from "./modules/auth/index.js";
+import kpiModule from "./modules/kpi/index.js";
 import { checkDbConnection } from "./config/db.js";
 
 // Load environment variables explicitly from src/config/.env
@@ -35,6 +36,7 @@ app.use(morgan("dev"));
 app.use("/health", healthModule.router);
 app.use("/employees", employeeModule.router);
 app.use("/auth", authModule.router);
+app.use("/kpi", kpiModule.router);
 
 // 404 Handler
 app.use((req, res) => {

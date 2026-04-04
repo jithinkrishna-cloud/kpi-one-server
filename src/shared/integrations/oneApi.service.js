@@ -12,16 +12,16 @@ dotenv.config({ path: path.join(__dirname, "..", "..", "config", ".env") });
 const baseUrl = process.env.ONE_API_BASE_URL;
 
 const ENDPOINTS = {
-  EMPLOYEES: "/employees",
-  TEAMS: "/teams",
-  ROLES: "/roles",
-  LEADS: "/leads",
-  DEALS: "/deals",
-  QUOTES: "/quotes",
-  ORDERS: "/orders",
-  SERVICES: "/services",
-  CALLS: "/calls",
-  MESSAGES: "/messages",
+  EMPLOYEES: "/api/employees",
+  TEAMS: "/api/teams",
+  ROLES: "/api/roles",
+  LEADS: "/api/leads",
+  DEALS: "/api/deals",
+  QUOTES: "/api/quotes",
+  ORDERS: "/api/orders",
+  SERVICES: "/api/services",
+  CALLYSER: "/api/callyser/calls",
+  INTERAKT: "/api/interakt/messages",
 };
 
 /**
@@ -75,6 +75,7 @@ export const oneApiRequest = async (endpoint, options = {}, token = null) => {
   }, 2); // 2 retries (total 3 attempts)
 };
 
+
 /**
  * Domain-Specific Wrappers
  */
@@ -92,7 +93,7 @@ export const getTeams = (params, token) =>
 export const getRoles = (params, token) => 
   oneApiRequest(ENDPOINTS.ROLES, { method: "GET", params }, token);
 
-// Sales
+// Sales/KPIs
 export const getLeads = (params, token) => 
   oneApiRequest(ENDPOINTS.LEADS, { method: "GET", params }, token);
 
@@ -105,12 +106,13 @@ export const getQuotes = (params, token) =>
 export const getOrders = (params, token) => 
   oneApiRequest(ENDPOINTS.ORDERS, { method: "GET", params }, token);
 
-// Engagement
+// Engagement/Communications
 export const getServices = (params, token) => 
   oneApiRequest(ENDPOINTS.SERVICES, { method: "GET", params }, token);
 
-export const getCalls = (params, token) => 
-  oneApiRequest(ENDPOINTS.CALLS, { method: "GET", params }, token);
+export const getCallLogs = (params, token) => 
+  oneApiRequest(ENDPOINTS.CALLYSER, { method: "GET", params }, token);
 
-export const getMessages = (params, token) => 
-  oneApiRequest(ENDPOINTS.MESSAGES, { method: "GET", params }, token);
+export const getMessageLogs = (params, token) => 
+  oneApiRequest(ENDPOINTS.INTERAKT, { method: "GET", params }, token);
+
