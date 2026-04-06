@@ -10,6 +10,24 @@ import { KPI_COMMISSION_CODES } from "../shared/kpi.constants.js";
  * Calc Workflow    : Manager triggers → engine locks + calculates → Admin approve/reject payout
  */
 
+// ─── Slab Normalizer ─────────────────────────────────────────────────────────
+
+/**
+ * Normalize slab objects to the canonical { min, max, bonus } shape.
+ * Accepts any of these field-name variants from the frontend:
+ *   { from, to, amount }   ← what the frontend currently sends
+ *   { min, max, bonus }    ← canonical storage format
+ *   { min, max, amount }   ← mixed variant
+ */
+const normalizeSlabs = (slabs) => {
+    if (!Array.isArray(slabs)) return slabs;
+    return slabs.map((s) => ({
+        min:   s.min   ?? s.from  ?? 0,
+        max:   s.max   ?? s.to    ?? null,   // null = open-ended (last slab)
+        bonus: s.bonus ?? s.amount ?? 0,
+    }));
+};
+
 // ─── Config Management ────────────────────────────────────────────────────────
 
 /**
@@ -39,10 +57,13 @@ export const getFullConfig = async (executiveId, periodId) => {
  * @param {number}        [config.bonusAmount]
  */
 export const saveKpiConfig = async (config) => {
-    const { executiveId, periodId, kpiCode, slabs, commissionRate, slabType } = config;
+    const { executiveId, periodId, kpiCode, commissionRate, slabType } = config;
 
-    // Validate slabs
-    if (slabs && slabs.length) validateSlabs(slabs);
+    // Normalize slab field names (frontend may send from/to/amount)
+    const slabs = normalizeSlabs(config.slabs || []);
+
+    // Validate normalized slabs
+    if (slabs.length) validateSlabs(slabs);
 
     // Revenue KPIs must have a commission rate
     if (KPI_COMMISSION_CODES.has(kpiCode) && (!commissionRate || commissionRate <= 0)) {
@@ -53,7 +74,7 @@ export const saveKpiConfig = async (config) => {
         executive_id:    executiveId,
         period_id:       periodId,
         kpi_code:        kpiCode,
-        slabs:           slabs || [],
+        slabs,
         commission_rate: commissionRate || 0,
         slab_type:       slabType || "non_cumulative",
         bonus_threshold: config.bonusThreshold || 0,
