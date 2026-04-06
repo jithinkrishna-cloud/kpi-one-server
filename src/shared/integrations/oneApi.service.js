@@ -20,7 +20,7 @@ const ENDPOINTS = {
   ROLES: "/filterEmployeesByRole",
 
   // Leads (Phase F12-B)
-  LEADS: "/lead-generation/getleads",
+  LEADS: "/lead-generation/get-all-the-leads",
   LEAD_STATS: "/lead-generation/lead-stats",
 
   // Revenue (Phase F12-B)
@@ -30,8 +30,8 @@ const ENDPOINTS = {
   ORDER_METRICS: "/ordermetrics",
 
   // Activity Feed
-  CALLYSER: "/api/callyser/calls",
-  INTERAKT: "/api/interakt/messages",
+  CALLYSER: "/callyser/calls",
+  INTERAKT: "/interakt/messages",
 };
 
 /**
