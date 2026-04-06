@@ -3,19 +3,28 @@ import { getOrSyncEmployee } from "../modules/employee/employee.service.js";
 import { error } from "../shared/utils/response.js";
 import { verifyKpiToken } from "../modules/auth/auth.service.js";
 
+/** Valid mapped KPI roles — anything outside this set needs re-mapping */
+const VALID_KPI_ROLES = ["KPI Admin", "KPI Manager", "KPI Executive", "KPI Franchisee"];
+
 /**
- * Maps ONE roles to KPI roles
- * @param {string} oneRole
- * @returns {string} Mapped KPI role
+ * Maps raw ONE CRM role names → KPI module role names.
+ * Must stay in sync with mapKpiRole() in auth.controller.js.
  */
 const mapRole = (oneRole) => {
   const roles = {
-    Admin: "KPI Admin",
-    Manager: "KPI Manager",
-    Executive: "KPI Executive",
-    Franchisee: "KPI Franchisee",
+    "Admin":                "KPI Admin",
+    "Bizpole Admin":        "KPI Admin",
+    "Super Admin":          "KPI Admin",
+    "Manager":              "KPI Manager",
+    "Team Lead":            "KPI Manager",
+    "Sales TL":             "KPI Manager",
+    "Franchisee":           "KPI Franchisee",
+    "Franchisee Admin":     "KPI Franchisee",
+    "BDE":                  "KPI Executive",
+    "CRE":                  "KPI Executive",
+    "Operations Executive": "KPI Executive",
   };
-  return roles[oneRole] || "KPI Executive"; // Default to KPI Executive
+  return roles[oneRole] || "KPI Executive";
 };
 
 /**
@@ -57,11 +66,19 @@ export const authenticate = async (req, res, next) => {
   try {
     // 1. Try local KPI-JWT first (Stateless & Fast)
     const kpiDecoded = verifyKpiToken(token);
-    
+
     if (kpiDecoded) {
+      // If kpiRole in token is already a valid mapped value, use it directly.
+      // Otherwise re-map from the raw role (handles old tokens where kpiRole
+      // was stored as the unmapped CRM name e.g. "Admin" instead of "KPI Admin").
+      const resolvedKpiRole = VALID_KPI_ROLES.includes(kpiDecoded.kpiRole)
+        ? kpiDecoded.kpiRole
+        : mapRole(kpiDecoded.kpiRole || kpiDecoded.role);
+
       req.user = {
         ...kpiDecoded,
-        kpiRole: kpiDecoded.role,
+        kpiRole: resolvedKpiRole,
+        scope: getScope(resolvedKpiRole, kpiDecoded),
         token,
       };
       return next();
@@ -97,14 +114,25 @@ export const authenticate = async (req, res, next) => {
 
 /**
  * Authorization Middleware
- * @param {...string} allowedRoles List of KPI roles allowed to access the route
+ *
+ * PRD Rule: KPI Admin has full access and bypasses all role restrictions.
+ * Other roles must be explicitly listed in allowedRoles.
+ *
+ * @param {...string} allowedRoles - KPI roles permitted for this route
  */
 export const authorize = (...allowedRoles) => {
   return (req, res, next) => {
-    if (!req.user || !allowedRoles.includes(req.user.kpiRole)) {
+    if (!req.user || !req.user.kpiRole) {
+      return error(res, "Unauthorized: No role found on request", null, 401);
+    }
+
+    // Admin bypasses all role restrictions — PRD: full access
+    if (req.user.kpiRole === "KPI Admin") return next();
+
+    if (!allowedRoles.includes(req.user.kpiRole)) {
       return error(
         res,
-        `Forbidden: ${req.user?.kpiRole || "Unknown role"} cannot perform this action`,
+        `Forbidden: ${req.user.kpiRole} does not have permission for this action`,
         null,
         403,
       );

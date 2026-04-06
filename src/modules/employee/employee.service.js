@@ -10,9 +10,11 @@ const selectPrimaryRole = (roles) => {
   return roles.find((r) => r.isPrimary || r.isDefault) || roles[0];
 };
 
+// Admin role names as returned by ONE CRM — these users are cross-team (no TeamID required)
+const ADMIN_ROLES = ["Admin", "Bizpole Admin", "Super Admin"];
+
 /**
  * Shared Helper: Maps raw CRM user data to our local Employee Cache structure.
- * Enforces strict mapping for KPI critical fields.
  * Handles both Login ('franchiseeRoles') and API ('Franchisees') formats.
  */
 const mapCrmUserToEmployee = (userData, isStrict = true) => {
@@ -22,20 +24,23 @@ const mapCrmUserToEmployee = (userData, isStrict = true) => {
     userData.franchiseeRoles || userData.Franchisees || userData.metadata || [];
   const primaryRole = selectPrimaryRole(roles);
 
-  // Requirement: TeamID is critical for KPI dashboards.
-  // We only throw if isStrict=true (Login). For Sync, we use COALESCE in repo to keep old value.
-  if (isStrict && !primaryRole.TeamID) {
+  const roleName = primaryRole.RoleName || userData.RoleName || userData.role || "";
+  const isAdmin  = ADMIN_ROLES.includes(roleName);
+
+  // TeamID is required for Managers/Executives so they are scoped to their team.
+  // Admins are cross-team — they have no TeamID and that is expected.
+  if (isStrict && !isAdmin && !primaryRole.TeamID) {
     throw new Error(
-      `Invalid CRM mapping: Missing TeamID for user ${userData.id || userData.EmployeeID}`,
+      `Invalid CRM mapping: Missing TeamID for user ${userData.id || userData.EmployeeID} (role: ${roleName || "unknown"})`,
     );
   }
 
   return {
     id: userData.id || userData.EmployeeID,
     name: userData.username || userData.EmployeeName || userData.name || "",
-    role: primaryRole.RoleName || "Employee",
+    role: roleName || "Employee",
     franchiseeId: primaryRole.FranchiseID || null,
-    teamId: primaryRole.TeamID || null, // Allow null here so COALESCE kicks in at repo
+    teamId: primaryRole.TeamID || null,
     metadata: roles,
   };
 };

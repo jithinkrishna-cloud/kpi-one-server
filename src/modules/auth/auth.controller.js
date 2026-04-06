@@ -1,8 +1,32 @@
 import axios from "axios";
 import { success, error } from "../../shared/utils/response.js";
 import { syncFromLoginResponse } from "../employee/employee.service.js";
-import { getTeams, getEmployees } from "../../shared/integrations/oneApi.service.js";
+import {
+  getTeams,
+  getEmployees,
+} from "../../shared/integrations/oneApi.service.js";
 import { signKpiToken } from "./auth.service.js";
+
+/**
+ * Maps raw ONE CRM role names → KPI module role names.
+ * Single source of truth — keep in sync with auth.middleware.js and authMiddleware.js.
+ */
+const mapKpiRole = (oneRole) => {
+  const map = {
+    "Admin":                 "KPI Admin",
+    "Bizpole Admin":         "KPI Admin",
+    "Super Admin":           "KPI Admin",
+    "Manager":               "KPI Manager",
+    "Team Lead":             "KPI Manager",
+    "Sales TL":              "KPI Manager",
+    "Franchisee":            "KPI Franchisee",
+    "Franchisee Admin":      "KPI Franchisee",
+    "BDE":                   "KPI Executive",
+    "CRE":                   "KPI Executive",
+    "Operations Executive":  "KPI Executive",
+  };
+  return map[oneRole] || "KPI Executive";
+};
 
 /**
  * Secure Auth Proxy for BIZPOLE ONE CRM
@@ -26,16 +50,21 @@ export const login = async (req, res) => {
 
     const { user, token: oneToken } = response.data;
     if (!user || !oneToken) {
-      throw new Error("Invalid response from ONE CRM: User data or token missing");
+      throw new Error("Invalid response from ONE CRM: user or token missing");
     }
 
     // 🚀 SYNC: Hydrate local cache and get KPI metadata
     const localUser = await syncFromLoginResponse(user);
-    
+    if (!localUser) {
+      throw new Error("Failed to sync user profile from ONE CRM response");
+    }
+
     // 🏷️ SESSION: Create a dedicated KPI module token (Stateless JWT)
+    // Store the MAPPED kpiRole ("KPI Admin", "KPI Manager", etc.) in the token
+    // so authorize() guards work correctly without re-mapping on every request.
     const kpiToken = signKpiToken({
       ...localUser,
-      kpiRole: localUser.role, // Assuming role is already mapped in syncFromLoginResponse
+      kpiRole: mapKpiRole(localUser.role),
     });
 
     // 🍪 SET COOKIE: Store the local KPI token securely
@@ -50,12 +79,14 @@ export const login = async (req, res) => {
     return res.status(response.status).json({
       ...response.data,
       kpiToken, // Expose for testing if needed
-      role: localUser.role
+      role: localUser.role,
     });
   } catch (err) {
-    console.error("Login Proxy Error:", err.response?.data || err.message);
+    // err.response exists  → axios error from ONE CRM (wrong credentials, network, etc.)
+    // err.response missing → internal error (mapping, DB, JWT secret missing, etc.)
+    console.error("Login Error:", err.response?.data || err.message);
     const statusCode = err.response?.status || 500;
-    const message = err.response?.data?.message || "Login failed via ONE CRM";
+    const message    = err.response?.data?.message || err.message || "Login failed";
     return error(res, message, err.response?.data || null, statusCode);
   }
 };
@@ -110,8 +141,8 @@ export const getOrgContext = async (req, res) => {
       scope: {
         currentRole: req.user.role,
         teamId: req.user.teamId,
-        franchiseeId: req.user.franchiseeId
-      }
+        franchiseeId: req.user.franchiseeId,
+      },
     });
   } catch (err) {
     console.error("Org Context retrieval error:", err.message);
