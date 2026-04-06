@@ -53,3 +53,13 @@ export const rejectPeriod = async (req, res) => {
     return error(res, err.message);
   }
 };
+
+export const closePeriod = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await service.closePeriod(id, req.user.id);
+    return success(res, "Period closed successfully", result);
+  } catch (err) {
+    return error(res, err.message);
+  }
+};

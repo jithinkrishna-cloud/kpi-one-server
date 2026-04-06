@@ -1,7 +1,7 @@
 import axios from "axios";
 import { success, error } from "../../shared/utils/response.js";
 import { syncFromLoginResponse } from "../employee/employee.service.js";
-import { getTeams, getRoles } from "../../shared/integrations/oneApi.service.js";
+import { getTeams, getEmployees } from "../../shared/integrations/oneApi.service.js";
 import { signKpiToken } from "./auth.service.js";
 
 /**
@@ -97,15 +97,16 @@ export const getOrgContext = async (req, res) => {
   const token = req.cookies?.token || req.headers?.authorization?.split(" ")[1];
 
   try {
-    // Fetch Teams and Roles in parallel for efficiency
-    const [teams, roles] = await Promise.all([
+    // Fetch Teams and Employees in parallel for efficiency
+    // Note: filterEmployeesByRole requires at least one filter, so we use getEmployees instead
+    const [teams, employees] = await Promise.all([
       getTeams({}, token),
-      getRoles({}, token)
+      getEmployees({}, token),
     ]);
 
     return success(res, "Organizational context retrieved", {
       teams: teams || [],
-      roles: roles || [],
+      employees: employees || [],
       scope: {
         currentRole: req.user.role,
         teamId: req.user.teamId,

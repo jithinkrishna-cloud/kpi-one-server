@@ -65,6 +65,49 @@ export const countTargetsByPeriod = async (periodId, connection = null) => {
     return rows[0].count;
 };
 
+/**
+ * Count executives with targets in this period whose incentives are NOT yet calculated/approved.
+ * Used as a pre-check before closing a period.
+ */
+export const countPendingIncentives = async (periodId, connection = null) => {
+    const db = connection || getPool();
+    // Executives who have targets but no incentive result (or result is still in 'draft')
+    const [rows] = await db.query(`
+        SELECT COUNT(DISTINCT t.executive_id) as count
+        FROM kpi_targets t
+        LEFT JOIN kpi_incentive_results ir
+            ON ir.executive_id = t.executive_id
+            AND ir.period_id = t.period_id
+            AND ir.status NOT IN ('calculated', 'approved', 'paid')
+        WHERE t.period_id = ?
+          AND (ir.id IS NULL OR ir.status IN ('draft'))
+    `, [periodId]);
+    return rows[0].count;
+};
+
+/**
+ * Count executives with targets in this period who are missing Collection (manual) actuals.
+ * Collection is a manually-entered KPI — must be present before period close.
+ */
+export const countMissingCollectionActuals = async (periodId, connection = null) => {
+    const db = connection || getPool();
+    // Find executives who have a collection_revenue target but no actual for the period date range
+    const [rows] = await db.query(`
+        SELECT COUNT(DISTINCT t.executive_id) as count
+        FROM kpi_targets t
+        JOIN kpi_periods p ON p.id = t.period_id
+        WHERE t.period_id = ?
+          AND t.kpi_code = 'collection_revenue'
+          AND NOT EXISTS (
+              SELECT 1 FROM kpi_actuals_daily a
+              WHERE a.executive_id = t.executive_id
+                AND a.kpi_code = 'collection_revenue'
+                AND a.actual_date BETWEEN p.start_date AND p.end_date
+          )
+    `, [periodId]);
+    return rows[0].count;
+};
+
 // --- Targets ---
 
 export const upsertTarget = async (target, connection = null) => {

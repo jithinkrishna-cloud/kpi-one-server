@@ -82,6 +82,60 @@ export const approvePeriod = async (id, approvedBy) => {
   });
 };
 
+export const closePeriod = async (id, closedBy) => {
+  return await repository.withTransaction(async (connection) => {
+    const period = await repository.lockPeriodForUpdate(connection, id);
+    if (!period) throw new Error("Period not found.");
+    if (period.status !== PERIOD_STATUS.ACTIVE)
+      throw new Error("Only active periods can be closed.");
+
+    // Rule: Cannot close if incentive not calculated
+    const pendingIncentives = await repository.countPendingIncentives(id, connection);
+    if (pendingIncentives > 0) {
+      throw new Error(
+        `Cannot close period. ${pendingIncentives} executive(s) have uncalculated incentives.`,
+      );
+    }
+
+    // Rule: Cannot close if manual actuals (Collection) are missing
+    const missingActuals = await repository.countMissingCollectionActuals(id, connection);
+    if (missingActuals > 0) {
+      throw new Error(
+        `Cannot close period. ${missingActuals} executive(s) are missing manual Collection actuals.`,
+      );
+    }
+
+    await repository.updatePeriodStatus(
+      id,
+      PERIOD_STATUS.CLOSED,
+      closedBy,
+      null,
+      connection,
+    );
+
+    // Freeze the period
+    await connection.query(
+      "UPDATE kpi_periods SET is_frozen = 1 WHERE id = ?",
+      [id],
+    );
+
+    await repository.logKpiAudit(
+      {
+        entity_type: AUDIT_ENTITY_TYPES.PERIOD,
+        record_id: id,
+        action: "close",
+        old_value: { status: period.status },
+        new_value: { status: PERIOD_STATUS.CLOSED, is_frozen: true },
+        performed_by: closedBy,
+        reason: "Period closed by Admin",
+      },
+      connection,
+    );
+
+    return { id, status: PERIOD_STATUS.CLOSED };
+  });
+};
+
 export const rejectPeriod = async (id, rejectedBy, reason) => {
   if (!reason) throw new Error("A reason for rejection is mandatory.");
 
