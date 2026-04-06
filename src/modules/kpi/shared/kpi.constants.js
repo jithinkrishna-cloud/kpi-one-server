@@ -88,6 +88,47 @@ export const KPI_ATTAINMENT_TYPE = {
 /** Attainment display cap — never shown above this % */
 export const ATTAINMENT_CAP = 150;
 
+/**
+ * F12-C: Revenue KPIs that earn Layer 1 Commission.
+ * Commission = actual_value × commission_rate (%).
+ */
+export const KPI_COMMISSION_CODES = new Set([
+    KPI_CODES.SALES_REVENUE,
+    KPI_CODES.COLLECTION_REVENUE,
+]);
+
+/**
+ * F12-C: Cumulative slab KPIs — stack all earned slabs up to the achieved level.
+ * Non-cumulative KPIs (everything else) earn ONLY the matching slab.
+ *
+ * Cumulative:     dialed_calls, customer_touch, talk_time, clients_onboarded, services_completed
+ * Non-cumulative: lead_quality_relevancy, lead_conversion, deal_creation, quote_creation,
+ *                 call_connect_rate, completion_tat
+ */
+export const KPI_CUMULATIVE_CODES = new Set([
+    KPI_CODES.DIALED_CALLS,
+    KPI_CODES.CUSTOMER_TOUCH,
+    KPI_CODES.TALK_TIME,
+    KPI_CODES.CLIENTS_ONBOARDED,
+    KPI_CODES.SERVICES_COMPLETED,
+]);
+
+/** Incentive config workflow statuses */
+export const CONFIG_STATUS = {
+    DRAFT:             "draft",
+    PENDING_APPROVAL:  "pending_approval",
+    ACTIVE:            "active",
+    REJECTED:          "rejected",
+};
+
+/** Payout summary statuses */
+export const PAYOUT_STATUS = {
+    CALCULATED: "calculated",
+    APPROVED:   "approved",
+    REJECTED:   "rejected",
+    PAID:       "paid",
+};
+
 export const PERIOD_STATUS = {
   DRAFT: "draft",
   PENDING: "pending",

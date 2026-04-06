@@ -444,6 +444,286 @@ export const getTeamPerformanceAggregation = async (teamId, periodId, connection
     return rows;
 };
 
+// --- F12-C: Incentive Config (full CRUD + approval) ---
+
+/**
+ * Get all KPI incentive configs for an executive in a specific period.
+ */
+export const getAllIncentiveConfigs = async (executiveId, periodId, connection = null) => {
+    const db = connection || getPool();
+    const [rows] = await db.query(
+        "SELECT * FROM kpi_incentive_configs WHERE executive_id = ? AND period_id = ?",
+        [executiveId, periodId]
+    );
+    return rows.map((r) => ({
+        ...r,
+        slabs: typeof r.slabs === "string" ? JSON.parse(r.slabs) : r.slabs,
+    }));
+};
+
+/**
+ * Upsert a single KPI incentive config row.
+ * Only allowed when status is 'draft'.
+ */
+export const upsertIncentiveConfig = async (config, connection = null) => {
+    const db = connection || getPool();
+    const {
+        executive_id, period_id, kpi_code,
+        slabs, commission_rate, slab_type,
+        bonus_threshold, bonus_amount,
+    } = config;
+
+    const [result] = await db.query(`
+        INSERT INTO kpi_incentive_configs
+        (executive_id, period_id, kpi_code, slabs, commission_rate, slab_type,
+         bonus_threshold, bonus_amount, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft')
+        ON DUPLICATE KEY UPDATE
+            slabs           = IF(status = 'draft', VALUES(slabs),           slabs),
+            commission_rate = IF(status = 'draft', VALUES(commission_rate), commission_rate),
+            slab_type       = IF(status = 'draft', VALUES(slab_type),       slab_type),
+            bonus_threshold = IF(status = 'draft', VALUES(bonus_threshold), bonus_threshold),
+            bonus_amount    = IF(status = 'draft', VALUES(bonus_amount),    bonus_amount)
+    `, [
+        executive_id, period_id, kpi_code,
+        JSON.stringify(slabs || []),
+        commission_rate || 0,
+        slab_type || "non_cumulative",
+        bonus_threshold || 0,
+        bonus_amount || 0,
+    ]);
+    return result;
+};
+
+/**
+ * Submit all configs for an executive/period for Admin approval.
+ */
+export const submitIncentiveConfigs = async (executiveId, periodId, submittedBy, connection = null) => {
+    const db = connection || getPool();
+    const [result] = await db.query(`
+        UPDATE kpi_incentive_configs
+        SET status = 'pending_approval', submitted_by = ?
+        WHERE executive_id = ? AND period_id = ? AND status = 'draft'
+    `, [submittedBy, executiveId, periodId]);
+    return result;
+};
+
+/**
+ * Admin approves all pending configs for an executive/period.
+ */
+export const approveIncentiveConfigs = async (executiveId, periodId, approvedBy, connection = null) => {
+    const db = connection || getPool();
+    const [result] = await db.query(`
+        UPDATE kpi_incentive_configs
+        SET status = 'active', approved_by = ?, approved_at = NOW()
+        WHERE executive_id = ? AND period_id = ? AND status = 'pending_approval'
+    `, [approvedBy, executiveId, periodId]);
+    return result;
+};
+
+/**
+ * Admin rejects configs for an executive/period with reason.
+ */
+export const rejectIncentiveConfigs = async (executiveId, periodId, rejectedBy, reason, connection = null) => {
+    const db = connection || getPool();
+    const [result] = await db.query(`
+        UPDATE kpi_incentive_configs
+        SET status = 'rejected', approved_by = ?, rejection_reason = ?
+        WHERE executive_id = ? AND period_id = ? AND status = 'pending_approval'
+    `, [rejectedBy, reason, executiveId, periodId]);
+    return result;
+};
+
+// --- F12-C: Composite Config ---
+
+export const getCompositeConfig = async (executiveId, periodId, connection = null) => {
+    const db = connection || getPool();
+    const [rows] = await db.query(
+        "SELECT * FROM kpi_composite_configs WHERE executive_id = ? AND period_id = ?",
+        [executiveId, periodId]
+    );
+    return rows[0] || null;
+};
+
+export const upsertCompositeConfig = async (config, connection = null) => {
+    const db = connection || getPool();
+    const { executive_id, period_id, composite_bonus } = config;
+    const [result] = await db.query(`
+        INSERT INTO kpi_composite_configs (executive_id, period_id, composite_bonus)
+        VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            composite_bonus = IF(status = 'draft', VALUES(composite_bonus), composite_bonus)
+    `, [executive_id, period_id, composite_bonus || 0]);
+    return result;
+};
+
+export const submitCompositeConfig = async (executiveId, periodId, submittedBy, connection = null) => {
+    const db = connection || getPool();
+    await db.query(`
+        UPDATE kpi_composite_configs
+        SET status = 'pending_approval', submitted_by = ?
+        WHERE executive_id = ? AND period_id = ? AND status = 'draft'
+    `, [submittedBy, executiveId, periodId]);
+};
+
+export const approveCompositeConfig = async (executiveId, periodId, approvedBy, connection = null) => {
+    const db = connection || getPool();
+    await db.query(`
+        UPDATE kpi_composite_configs
+        SET status = 'active', approved_by = ?, approved_at = NOW()
+        WHERE executive_id = ? AND period_id = ? AND status = 'pending_approval'
+    `, [approvedBy, executiveId, periodId]);
+};
+
+export const rejectCompositeConfig = async (executiveId, periodId, rejectedBy, reason, connection = null) => {
+    const db = connection || getPool();
+    await db.query(`
+        UPDATE kpi_composite_configs
+        SET status = 'rejected', approved_by = ?, rejection_reason = ?
+        WHERE executive_id = ? AND period_id = ? AND status = 'pending_approval'
+    `, [rejectedBy, reason, executiveId, periodId]);
+};
+
+// --- F12-C: Lock & Save Incentive Results ---
+
+/**
+ * Save a per-KPI incentive result with 3-layer breakdown.
+ * Once is_locked = 1, the row cannot be recalculated.
+ */
+export const saveIncentiveResultF12C = async (result, connection = null) => {
+    const db = connection || getPool();
+    const {
+        executive_id, period_id, kpi_code,
+        actual_value, target_value, attainment_pct,
+        commission_earned, slab_bonus_earned, composite_bonus_earned,
+        total_incentive, status,
+    } = result;
+
+    const [res] = await db.query(`
+        INSERT INTO kpi_incentive_results
+        (executive_id, period_id, kpi_code, actual_value, target_value,
+         attainment_pct, commission_earned, slab_bonus_earned, composite_bonus_earned,
+         total_incentive, status, is_locked)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+        ON DUPLICATE KEY UPDATE
+            actual_value           = IF(is_locked = 1, actual_value,           VALUES(actual_value)),
+            target_value           = IF(is_locked = 1, target_value,           VALUES(target_value)),
+            attainment_pct         = IF(is_locked = 1, attainment_pct,         VALUES(attainment_pct)),
+            commission_earned      = IF(is_locked = 1, commission_earned,      VALUES(commission_earned)),
+            slab_bonus_earned      = IF(is_locked = 1, slab_bonus_earned,      VALUES(slab_bonus_earned)),
+            composite_bonus_earned = IF(is_locked = 1, composite_bonus_earned, VALUES(composite_bonus_earned)),
+            total_incentive        = IF(is_locked = 1, total_incentive,        VALUES(total_incentive)),
+            status                 = IF(is_locked = 1, status,                 VALUES(status)),
+            calculated_at          = IF(is_locked = 1, calculated_at,          NOW())
+    `, [
+        executive_id, period_id, kpi_code,
+        actual_value, target_value, attainment_pct,
+        commission_earned, slab_bonus_earned, composite_bonus_earned,
+        total_incentive, status || "calculated",
+    ]);
+    return res;
+};
+
+/**
+ * Lock all incentive results for an executive/period.
+ * After locking, no edits allowed — PRD rule.
+ */
+export const lockIncentiveResults = async (executiveId, periodId, connection = null) => {
+    const db = connection || getPool();
+    await db.query(`
+        UPDATE kpi_incentive_results
+        SET is_locked = 1
+        WHERE executive_id = ? AND period_id = ?
+    `, [executiveId, periodId]);
+};
+
+/**
+ * Check if any result row is already locked for this executive/period.
+ */
+export const isIncentiveLocked = async (executiveId, periodId, connection = null) => {
+    const db = connection || getPool();
+    const [rows] = await db.query(`
+        SELECT COUNT(*) AS cnt FROM kpi_incentive_results
+        WHERE executive_id = ? AND period_id = ? AND is_locked = 1
+    `, [executiveId, periodId]);
+    return rows[0].cnt > 0;
+};
+
+// --- F12-C: Payout Summary ---
+
+export const getPayoutSummary = async (executiveId, periodId, connection = null) => {
+    const db = connection || getPool();
+    const [rows] = await db.query(
+        "SELECT * FROM kpi_payout_summary WHERE executive_id = ? AND period_id = ?",
+        [executiveId, periodId]
+    );
+    return rows[0] || null;
+};
+
+export const upsertPayoutSummary = async (summary, connection = null) => {
+    const db = connection || getPool();
+    const {
+        executive_id, period_id,
+        total_commission, total_slab_bonus, composite_bonus,
+        grand_total, calculated_by,
+    } = summary;
+
+    const [result] = await db.query(`
+        INSERT INTO kpi_payout_summary
+        (executive_id, period_id, total_commission, total_slab_bonus,
+         composite_bonus, grand_total, status, calculated_by)
+        VALUES (?, ?, ?, ?, ?, ?, 'calculated', ?)
+        ON DUPLICATE KEY UPDATE
+            total_commission  = VALUES(total_commission),
+            total_slab_bonus  = VALUES(total_slab_bonus),
+            composite_bonus   = VALUES(composite_bonus),
+            grand_total       = VALUES(grand_total),
+            status            = 'calculated',
+            calculated_by     = VALUES(calculated_by),
+            calculated_at     = NOW()
+    `, [
+        executive_id, period_id,
+        total_commission, total_slab_bonus,
+        composite_bonus, grand_total, calculated_by,
+    ]);
+    return result;
+};
+
+export const approvePayoutSummary = async (executiveId, periodId, approvedBy, connection = null) => {
+    const db = connection || getPool();
+    const [result] = await db.query(`
+        UPDATE kpi_payout_summary
+        SET status = 'approved', approved_by = ?, approved_at = NOW()
+        WHERE executive_id = ? AND period_id = ? AND status = 'calculated'
+    `, [approvedBy, executiveId, periodId]);
+    return result;
+};
+
+export const rejectPayoutSummary = async (executiveId, periodId, rejectedBy, reason, connection = null) => {
+    const db = connection || getPool();
+    const [result] = await db.query(`
+        UPDATE kpi_payout_summary
+        SET status = 'rejected', approved_by = ?, rejection_reason = ?
+        WHERE executive_id = ? AND period_id = ? AND status = 'calculated'
+    `, [rejectedBy, reason, executiveId, periodId]);
+    return result;
+};
+
+/**
+ * Get all payout summaries for a period (Admin view — all executives).
+ */
+export const getAllPayoutsByPeriod = async (periodId, connection = null) => {
+    const db = connection || getPool();
+    const [rows] = await db.query(`
+        SELECT ps.*, e.name AS executive_name
+        FROM kpi_payout_summary ps
+        JOIN one_employee_cache e ON e.one_employee_id = ps.executive_id
+        WHERE ps.period_id = ?
+        ORDER BY ps.grand_total DESC
+    `, [periodId]);
+    return rows;
+};
+
 // --- Metadata & Helpers ---
 
 export const getKpiMaster = async (connection = null) => {
