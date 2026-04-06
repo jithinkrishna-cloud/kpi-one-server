@@ -42,6 +42,52 @@ export const KPI_TYPES = {
   OUTPUT: "output",
 };
 
+/**
+ * F12-B: Data source per KPI.
+ * "auto"   → fetched in real-time from ONE CRM APIs
+ * "manual" → entered by Manager; immutable once saved
+ */
+export const KPI_DATA_SOURCE = {
+  [KPI_CODES.SALES_REVENUE]:          "auto",
+  [KPI_CODES.COLLECTION_REVENUE]:     "manual",   // Only manual KPI
+  [KPI_CODES.LEAD_QUALITY_RELEVANCY]: "auto",
+  [KPI_CODES.LEAD_CONVERSION]:        "auto",
+  [KPI_CODES.CALL_CONNECT_RATE]:      "auto",
+  [KPI_CODES.DEAL_CREATION]:          "auto",
+  [KPI_CODES.QUOTE_CREATION]:         "auto",
+  [KPI_CODES.CUSTOMER_TOUCH]:         "auto",
+  [KPI_CODES.DIALED_CALLS]:           "auto",
+  [KPI_CODES.TALK_TIME]:              "auto",
+  [KPI_CODES.CLIENTS_ONBOARDED]:      "auto",
+  [KPI_CODES.SERVICES_COMPLETED]:     "auto",
+  [KPI_CODES.COMPLETION_TAT]:         "auto",
+};
+
+/**
+ * F12-B: Attainment formula type per KPI.
+ *
+ * "standard" → (Actual ÷ Target) × 100  [Revenue, %, Activity, Counts, Talk Time]
+ * "tat"      → (Benchmark ÷ Actual TAT) × 100  [lower is better; breach if Actual > Ceiling]
+ */
+export const KPI_ATTAINMENT_TYPE = {
+  [KPI_CODES.SALES_REVENUE]:          "standard",
+  [KPI_CODES.COLLECTION_REVENUE]:     "standard",
+  [KPI_CODES.LEAD_QUALITY_RELEVANCY]: "standard",
+  [KPI_CODES.LEAD_CONVERSION]:        "standard",
+  [KPI_CODES.CALL_CONNECT_RATE]:      "standard",
+  [KPI_CODES.DEAL_CREATION]:          "standard",
+  [KPI_CODES.QUOTE_CREATION]:         "standard",
+  [KPI_CODES.CUSTOMER_TOUCH]:         "standard",
+  [KPI_CODES.DIALED_CALLS]:           "standard",
+  [KPI_CODES.TALK_TIME]:              "standard",
+  [KPI_CODES.CLIENTS_ONBOARDED]:      "standard",
+  [KPI_CODES.SERVICES_COMPLETED]:     "standard",
+  [KPI_CODES.COMPLETION_TAT]:         "tat",
+};
+
+/** Attainment display cap — never shown above this % */
+export const ATTAINMENT_CAP = 150;
+
 export const PERIOD_STATUS = {
   DRAFT: "draft",
   PENDING: "pending",
@@ -54,6 +100,7 @@ export const AUDIT_ENTITY_TYPES = {
   PERIOD: "period",
   TARGET: "target",
   TEAM_TARGET: "team_target",
+  ACTUAL: "actual",
 };
 
 export const INCENTIVE_STATUS = {

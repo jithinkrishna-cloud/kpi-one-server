@@ -4,17 +4,23 @@
  */
 
 /**
- * Calculates attainment and incentives for a single KPI.
- * @param {number} actual - Actual performance value
- * @param {number} target - Target performance value
- * @param {Array} slabs - JSON array of incentive slabs [{"min": 80, "max": 90, "rate": 0.02}, ...]
- * @param {number} bonusThreshold - Min attainment % for bonus
- * @param {number} bonusAmount - Fixed bonus amount
+ * Calculates incentives for a single KPI using a pre-computed attainment %.
+ *
+ * @param {number} actual           - Actual performance value
+ * @param {number} target           - Target performance value
+ * @param {Array}  slabs            - [{"min": 80, "max": 90, "rate": 0.02}, ...]
+ * @param {number} bonusThreshold   - Min attainment % for bonus
+ * @param {number} bonusAmount      - Fixed bonus amount
+ * @param {number} [attainmentOverride] - Pre-computed (uncapped) attainment %;
+ *                                        if provided, skips internal calculation.
+ *                                        Use for TAT KPI where formula differs.
  * @returns {Object} { attainmentPct, commission, bonus, total }
  */
-export const calculateKpiIncentive = (actual, target, slabs = [], bonusThreshold = 0, bonusAmount = 0) => {
-  // 1. Attainment Percentage
-  const attainmentPct = target > 0 ? (actual / target) * 100 : 0;
+export const calculateKpiIncentive = (actual, target, slabs = [], bonusThreshold = 0, bonusAmount = 0, attainmentOverride = null) => {
+  // 1. Attainment Percentage — use override if caller already computed it (e.g. TAT)
+  const attainmentPct = attainmentOverride !== null
+    ? attainmentOverride
+    : (target > 0 ? (actual / target) * 100 : 0);
 
   // 2. Find applicable Slab
   // Note: Slabs define the rate based on attainment brackets
