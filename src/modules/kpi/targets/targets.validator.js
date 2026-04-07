@@ -24,16 +24,20 @@ export const validateTargetEntry = async (periodId, kpiCode, values) => {
     if (!kpi) throw new Error(`Invalid KPI code: ${kpiCode}`);
 
     if (kpi.requires_dual_target) {
-        // Requirement 4 & 12: TAT validation
-        if (benchmark_value === undefined || ceiling_value === undefined) {
-             throw new Error(`KPI ${kpiCode} requires both benchmark and ceiling values.`);
+        // AC04: TAT requires benchmark + ceiling — block null, undefined, NaN, and zero
+        if (benchmark_value == null || ceiling_value == null ||
+            isNaN(parseFloat(benchmark_value)) || isNaN(parseFloat(ceiling_value))) {
+            throw new Error(`KPI ${kpiCode} requires valid benchmark and ceiling values.`);
+        }
+        if (parseFloat(benchmark_value) <= 0 || parseFloat(ceiling_value) <= 0) {
+            throw new Error("Benchmark and ceiling values must be greater than zero.");
         }
         if (parseFloat(benchmark_value) >= parseFloat(ceiling_value)) {
-            throw new Error("Benchmark value must be less than Ceiling value for TAT KPIs.");
+            throw new Error("Benchmark value must be less than ceiling value for TAT KPIs.");
         }
     } else {
-        if (target_value === undefined || isNaN(target_value) || target_value < 0) {
-            throw new Error(`Invalid target value for ${kpiCode}. Must be a positive number.`);
+        if (target_value == null || isNaN(parseFloat(target_value)) || parseFloat(target_value) < 0) {
+            throw new Error(`Invalid target value for ${kpiCode}. Must be a non-negative number.`);
         }
     }
 

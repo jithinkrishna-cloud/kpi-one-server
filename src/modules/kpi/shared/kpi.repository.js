@@ -162,7 +162,12 @@ export const getTargetsByExecutive = async (executiveId, periodId, connection = 
         "SELECT * FROM kpi_targets WHERE executive_id = ? AND period_id = ?",
         [executiveId, periodId]
     );
-    return rows;
+    return rows.map(r => ({
+        ...r,
+        revision_history: r.revision_history
+            ? (typeof r.revision_history === 'string' ? JSON.parse(r.revision_history) : r.revision_history)
+            : [],
+    }));
 };
 
 // --- Team Targets ---

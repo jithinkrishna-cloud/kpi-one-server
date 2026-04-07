@@ -54,31 +54,34 @@ export const createTarget = async (
     );
     const prevTarget = existingTargets.find((t) => t.kpi_code === kpiCode);
 
-    // Requirement: Duplicate target not allowed if trying to "add" new.
-    // We'll treat this as an "upsert" but log it correctly.
+    // AC09: Reason is mandatory for edits (not initial set)
+    if (prevTarget && !values.reason?.trim()) {
+      throw new Error("Reason is mandatory when editing an existing target.");
+    }
+
+    // AC10: Normalize both old and new to the same shape for clean history
+    const normalizeValues = (v) => ({
+      val:   v?.target_value   ?? null,
+      bench: v?.benchmark_value ?? null,
+      ceil:  v?.ceiling_value   ?? null,
+    });
 
     const revision = {
-      timestamp: new Date().toISOString(),
-      old_value: prevTarget
-        ? {
-            val: prevTarget.target_value,
-            bench: prevTarget.benchmark_value,
-            ceil: prevTarget.ceiling_value,
-          }
-        : null,
-      new_value: values,
+      timestamp:  new Date().toISOString(),
+      old_value:  prevTarget ? normalizeValues(prevTarget) : null,
+      new_value:  normalizeValues(values),
       updated_by: userId,
-      reason: values.reason || (prevTarget ? "Update" : "Initial Set"),
+      reason:     values.reason?.trim() || "Initial Set",
     };
 
     const target = {
-      executive_id: executiveId,
-      period_id: periodId,
-      kpi_code: kpiCode,
-      target_value: values.target_value || 0,
-      benchmark_value: values.benchmark_value || null,
-      ceiling_value: values.ceiling_value || null,
-      set_by: userId,
+      executive_id:    executiveId,
+      period_id:       periodId,
+      kpi_code:        kpiCode,
+      target_value:    values.target_value    ?? null,
+      benchmark_value: values.benchmark_value ?? null,
+      ceiling_value:   values.ceiling_value   ?? null,
+      set_by:          userId,
       revision_history: prevTarget
         ? [...prevTarget.revision_history, revision]
         : [revision],
@@ -90,11 +93,11 @@ export const createTarget = async (
     await repository.logKpiAudit(
       {
         entity_type: AUDIT_ENTITY_TYPES.TARGET,
-        record_id: prevTarget ? prevTarget.id : result.insertId || 0,
-        action: prevTarget ? "update" : "create",
-        old_value: revision.old_value,
-        new_value: values,
-        reason: revision.reason,
+        record_id:   prevTarget ? prevTarget.id : result.insertId || 0,
+        action:      prevTarget ? "update" : "create",
+        old_value:   revision.old_value,
+        new_value:   revision.new_value,
+        reason:      revision.reason,
         performed_by: userId,
       },
       connection,
@@ -312,24 +315,53 @@ export const setBulkTargets = async (targets, currentUser) => {
       }
     }
 
-    const preparedTargets = targets.map((t) => ({
-      executive_id: t.executiveId,
-      period_id: t.periodId,
-      kpi_code: t.kpiCode,
-      target_value: t.values.target_value || 0,
-      benchmark_value: t.values.benchmark_value || null,
-      ceiling_value: t.values.ceiling_value || null,
-      set_by: userId,
-      revision_history: [
-        {
-          timestamp: new Date().toISOString(),
-          action: "bulk_set",
-          new_value: t.values,
-          updated_by: userId,
-          reason: t.values.reason || "Bulk Upload",
-        },
-      ],
-    }));
+    // Fetch existing targets for all affected executives to check AC09 + preserve history
+    const existingByKey = {};
+    for (const execId of execIds) {
+      const rows = await repository.getTargetsByExecutive(execId, periodId, connection);
+      for (const row of rows) {
+        existingByKey[`${execId}:${row.kpi_code}`] = row;
+      }
+    }
+
+    // AC09: Reason mandatory for any target that already exists (bulk edit)
+    for (const t of targets) {
+      const key = `${t.executiveId}:${t.kpiCode}`;
+      if (existingByKey[key] && !t.values.reason?.trim()) {
+        throw new Error(
+          `Reason is mandatory when editing an existing target (executive ${t.executiveId}, KPI ${t.kpiCode}).`,
+        );
+      }
+    }
+
+    const normalizeValues = (v) => ({
+      val:   v?.target_value    ?? null,
+      bench: v?.benchmark_value ?? null,
+      ceil:  v?.ceiling_value   ?? null,
+    });
+
+    const preparedTargets = targets.map((t) => {
+      const key  = `${t.executiveId}:${t.kpiCode}`;
+      const prev = existingByKey[key];
+      const revision = {
+        timestamp:  new Date().toISOString(),
+        action:     prev ? "bulk_edit" : "bulk_set",
+        old_value:  prev ? normalizeValues(prev) : null,
+        new_value:  normalizeValues(t.values),
+        updated_by: userId,
+        reason:     t.values.reason?.trim() || "Bulk Upload",
+      };
+      return {
+        executive_id:    t.executiveId,
+        period_id:       t.periodId,
+        kpi_code:        t.kpiCode,
+        target_value:    t.values.target_value    ?? null,
+        benchmark_value: t.values.benchmark_value ?? null,
+        ceiling_value:   t.values.ceiling_value   ?? null,
+        set_by:          userId,
+        revision_history: prev ? [...prev.revision_history, revision] : [revision],
+      };
+    });
 
     await repository.batchInsertTargets(preparedTargets, connection);
 
