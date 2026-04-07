@@ -14,7 +14,7 @@ export const createTarget = async (
   values,
   currentUser,
 ) => {
-  const { id: userId, kpiRole, teamId: userTeamId } = currentUser;
+  const { id: userId, kpiRole, teamIds = [] } = currentUser;
 
   return await repository.withTransaction(async (connection) => {
     // 1. Validation & Locking (Basic checks)
@@ -40,7 +40,7 @@ export const createTarget = async (
     );
     const execTeamId = execRows[0]?.team_id;
 
-    if (kpiRole !== "KPI Admin" && execTeamId !== userTeamId) {
+    if (kpiRole !== "KPI Admin" && !teamIds.map(String).includes(String(execTeamId))) {
       throw new Error(
         "Forbidden: You can only set targets for your own team members.",
       );
@@ -173,7 +173,7 @@ export const overrideTeamTarget = async (
   currentUser,
   reason,
 ) => {
-  const { id: userId, kpiRole, teamId: userTeamId } = currentUser;
+  const { id: userId, kpiRole, teamIds = [] } = currentUser;
 
   if (!reason) throw new Error("A reason for override is mandatory.");
 
@@ -192,7 +192,7 @@ export const overrideTeamTarget = async (
     }
 
     // 2. Team Isolation Check
-    if (kpiRole !== "KPI Admin" && teamId !== userTeamId) {
+    if (kpiRole !== "KPI Admin" && !teamIds.map(String).includes(String(teamId))) {
       throw new Error(
         "Forbidden: You can only override targets for your own team.",
       );
@@ -261,7 +261,7 @@ export const overrideTeamTarget = async (
 };
 
 export const setBulkTargets = async (targets, currentUser) => {
-  const { id: userId } = currentUser;
+  const { id: userId, kpiRole, teamIds = [] } = currentUser;
 
   return await repository.withTransaction(async (connection) => {
     const periodId = targets[0]?.periodId;
@@ -276,6 +276,30 @@ export const setBulkTargets = async (targets, currentUser) => {
       period.is_frozen
     ) {
       throw new Error("Cannot modify targets for this period.");
+    }
+
+    // Resolve each executive's team from cache (don't trust request body for team IDs)
+    const execIds = [...new Set(targets.map((t) => t.executiveId))];
+    const placeholders = execIds.map(() => "?").join(",");
+    const [execRows] = await connection.query(
+      `SELECT one_employee_id, team_id FROM one_employee_cache WHERE one_employee_id IN (${placeholders})`,
+      execIds,
+    );
+    const execTeamMap = Object.fromEntries(
+      execRows.map((r) => [String(r.one_employee_id), r.team_id]),
+    );
+
+    // Team Isolation Check
+    if (kpiRole !== "KPI Admin") {
+      const userTeamStrings = teamIds.map(String);
+      for (const t of targets) {
+        const execTeam = String(execTeamMap[String(t.executiveId)] ?? "");
+        if (!userTeamStrings.includes(execTeam)) {
+          throw new Error(
+            `Forbidden: Executive ${t.executiveId} is not in your team.`,
+          );
+        }
+      }
     }
 
     const preparedTargets = targets.map((t) => ({
@@ -297,15 +321,12 @@ export const setBulkTargets = async (targets, currentUser) => {
       ],
     }));
 
-    const result = await repository.batchInsertTargets(
-      preparedTargets,
-      connection,
-    );
+    await repository.batchInsertTargets(preparedTargets, connection);
 
     // Audit Log
     await repository.logKpiAudit(
       {
-        entity_type: AUDIT_ENTITY_TYPES.PERIOD, // Bulk action logged against period
+        entity_type: AUDIT_ENTITY_TYPES.PERIOD,
         record_id: periodId,
         action: "update",
         new_value: { bulk_insert_count: targets.length },
@@ -315,19 +336,17 @@ export const setBulkTargets = async (targets, currentUser) => {
       connection,
     );
 
-    // Reconcile all affected teams/KPIs (Simplified for bulk)
-    const teamKpiPairs = [
-      ...new Set(targets.map((t) => `${t.teamId}:${t.kpiCode}`)),
-    ];
+    // Reconcile all affected team/KPI pairs — derive team from cache, not request body
+    const teamKpiPairs = new Set(
+      targets
+        .filter((t) => execTeamMap[String(t.executiveId)])
+        .map((t) => `${execTeamMap[String(t.executiveId)]}:${t.kpiCode}`),
+    );
     for (const pair of teamKpiPairs) {
       const [teamId, kpiCode] = pair.split(":");
       await syncTeamTarget(teamId, periodId, kpiCode, connection);
     }
 
-    // Return all targets for this period (for the impacted executives)
-    // Since we don't have a getTargetsByPeriod easily, we can return the bulk set result summary or fetch all
-    // For now, let's just return the bulk summary or a generic success if multiple people involved.
-    // Actually, returning what was inserted is better.
     return {
       message: `Successfully updated ${targets.length} targets`,
       count: targets.length,
