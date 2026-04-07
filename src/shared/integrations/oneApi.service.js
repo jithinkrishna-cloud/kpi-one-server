@@ -18,6 +18,7 @@ const ENDPOINTS = {
   SALES_EMPLOYEES: "/sales-employees",
   TEAMS: "/getTeams",
   ROLES: "/filterEmployeesByRole",
+  ROLES_ALL: "/getRoles", // GET — returns full { RoleID, RoleTypeId } list
 
   // Leads (Phase F12-B)
   LEADS: "/lead-generation/get-all-the-leads",
@@ -104,14 +105,23 @@ export const getEmployees = (params, token) =>
 export const getEmployeeById = (id, token) =>
   oneApiRequest(`${ENDPOINTS.EMPLOYEE_DETAIL}/${id}`, { method: "GET" }, token);
 
-export const getTeams = (params, token) =>
-  oneApiRequest(ENDPOINTS.TEAMS, { method: "GET", params }, token);
+// /getTeams is a POST endpoint on the ONE CRM platform
+export const getTeams = (data = {}, token) =>
+  oneApiRequest(ENDPOINTS.TEAMS, { method: "POST", data }, token);
 
 export const getSalesEmployees = (params, token) =>
   oneApiRequest(ENDPOINTS.SALES_EMPLOYEES, { method: "GET", params }, token);
 
 export const getRoles = (data, token) =>
   oneApiRequest(ENDPOINTS.ROLES, { method: "POST", data }, token);
+
+/**
+ * GET /getRoles — Returns the full platform role list with RoleTypeId mappings.
+ * RoleTypeId: 1=Admin, 2=Manager (Team Lead), 3=Executive
+ * Used by getOrSyncEmployee to map RoleID → RoleTypeId without depending on RoleName.
+ */
+export const getRolesAll = (token) =>
+  oneApiRequest(ENDPOINTS.ROLES_ALL, { method: "GET" }, token);
 
 // Sales/KPIs
 export const getLeads = (data, token) =>

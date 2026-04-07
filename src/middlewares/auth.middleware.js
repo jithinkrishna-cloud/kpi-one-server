@@ -2,108 +2,119 @@ import { verifyToken } from "../shared/integrations/oneApi.service.js";
 import { getOrSyncEmployee } from "../modules/employee/employee.service.js";
 import { error } from "../shared/utils/response.js";
 import { verifyKpiToken } from "../modules/auth/auth.service.js";
-
-/** Valid mapped KPI roles — anything outside this set needs re-mapping */
-const VALID_KPI_ROLES = ["KPI Admin", "KPI Manager", "KPI Executive", "KPI Franchisee"];
+import { mapKpiRole } from "../shared/utils/kpiRoleMapper.js";
 
 /**
- * Maps raw ONE CRM role names → KPI module role names.
- * Must stay in sync with mapKpiRole() in auth.controller.js.
- */
-const mapRole = (oneRole) => {
-  const roles = {
-    "Admin":                "KPI Admin",
-    "Bizpole Admin":        "KPI Admin",
-    "Super Admin":          "KPI Admin",
-    "Manager":              "KPI Manager",
-    "Team Lead":            "KPI Manager",
-    "Sales TL":             "KPI Manager",
-    "Franchisee":           "KPI Franchisee",
-    "Franchisee Admin":     "KPI Franchisee",
-    "BDE":                  "KPI Executive",
-    "CRE":                  "KPI Executive",
-    "Operations Executive": "KPI Executive",
-  };
-  return roles[oneRole] || "KPI Executive";
-};
-
-/**
- * Determines the data access scope based on the role
- * @param {string} kpiRole
- * @param {Object} user
- * @returns {Object} Scope and filter metadata
+ * Builds the RBAC data-access scope for the current user.
+ * Used by controllers to scope DB queries without repeating logic.
+ *
+ * Manager scope now includes ALL teams they belong to (multi-team PRD rule).
  */
 const getScope = (kpiRole, user) => {
-  const userId = user.id || user.one_employee_id;
-  const teamId = user.teamId || user.team_id || user.TeamID;
-  const franchiseeId = user.franchiseeId || user.franchisee_id || user.FranchiseID;
-
   switch (kpiRole) {
     case "KPI Admin":
       return { type: "all" };
     case "KPI Manager":
-      return { type: "team", teamId };
-    case "KPI Franchisee":
-      return { type: "franchise", franchiseeId };
+      // Managers see every executive across all their teams
+      return { type: "team", teamIds: user.teamIds || [] };
     case "KPI Executive":
     default:
-      return { type: "own", oneEmployeeId: userId };
+      return { type: "own", oneEmployeeId: user.id };
   }
 };
 
 /**
  * Authentication Middleware
- * Verifies the local KPI token (primary) or falls back to ONE CRM token.
- * Hydrates req.user with KPI roles and scopes.
+ *
+ * Flow:
+ *   1. Extract token from Authorization header or cookie
+ *   2. Verify as KPI token (fast local check) — extract userId only
+ *      OR verify as ONE CRM token (fallback)
+ *   3. Always re-fetch employee data from cache/ONE API
+ *      → Ensures role is NEVER taken blindly from a potentially stale token
+ *      → Cache TTL is 10 min so this is cheap
+ *   4. Build req.user from fresh DB data
+ *
+ * req.user shape:
+ *   {
+ *     id:           200,             ← ONE CRM EmployeeID (never internal DB pk)
+ *     name:         "Suma",
+ *     kpiRole:      "KPI Manager",   ← highest-privilege, derived from all teams
+ *     roles:        [2],             ← RoleTypeIds
+ *     teamIds:      [9, 29],         ← all TeamIDs
+ *     franchiseeId: "1",
+ *     scope:        { type, teamIds }
+ *   }
  */
 export const authenticate = async (req, res, next) => {
-  const token = req.cookies?.token || req.headers.authorization?.split(" ")[1];
+  const token =
+    req.cookies?.token || req.headers.authorization?.split(" ")[1];
 
   if (!token) {
     return error(res, "Unauthorized: No token provided", null, 401);
   }
 
+  // ONE CRM token — needed to proxy calls to ONE CRM APIs (e.g. /getTeams).
+  // Stored in a separate `one_token` cookie at login, or passed via X-One-Token header.
+  // This is distinct from `token` (KPI JWT) which is only valid within this backend.
+  const oneToken =
+    req.cookies?.one_token ||
+    req.headers["x-one-token"] ||
+    null;
+
   try {
-    // 1. Try local KPI-JWT first (Stateless & Fast)
+    // --- Step 1: Identify the user from the token (do NOT trust payload role) ---
+    let oneEmployeeId;
+
     const kpiDecoded = verifyKpiToken(token);
-
     if (kpiDecoded) {
-      // If kpiRole in token is already a valid mapped value, use it directly.
-      // Otherwise re-map from the raw role (handles old tokens where kpiRole
-      // was stored as the unmapped CRM name e.g. "Admin" instead of "KPI Admin").
-      const resolvedKpiRole = VALID_KPI_ROLES.includes(kpiDecoded.kpiRole)
-        ? kpiDecoded.kpiRole
-        : mapRole(kpiDecoded.kpiRole || kpiDecoded.role);
-
-      req.user = {
-        ...kpiDecoded,
-        kpiRole: resolvedKpiRole,
-        scope: getScope(resolvedKpiRole, kpiDecoded),
-        token,
-      };
-      return next();
+      // KPI token verified — use id as the CRM EmployeeID
+      // After the signKpiToken fix, token.id = one_employee_id (CRM id)
+      oneEmployeeId = kpiDecoded.id;
+    } else {
+      // Fallback: try ONE CRM token
+      const oneDecoded = await verifyToken(token);
+      if (!oneDecoded?.id) {
+        return error(res, "Unauthorized: Invalid or expired token", null, 401);
+      }
+      oneEmployeeId = oneDecoded.id;
     }
 
-    // 2. Fallback: Verify with ONE CRM (External or Legacy)
-    const oneDecoded = await verifyToken(token);
-    if (!oneDecoded || !oneDecoded.id) {
-      return error(res, "Unauthorized: Invalid token", null, 401);
+    if (!oneEmployeeId) {
+      return error(res, "Unauthorized: Token is missing a User ID", null, 401);
     }
 
-    // Hydrate from cache/ONE to build a full KPI session
-    const userData = await getOrSyncEmployee(oneDecoded.id, token);
-    if (!userData) {
-      return error(res, "Unauthorized: Profile sync failed", null, 401);
+    // --- Step 2: Always load fresh employee data from cache / ONE CRM ---
+    // PRD: DO NOT trust token role blindly — re-derive from latest data.
+    // Pass the ONE CRM token for any live API calls inside getOrSyncEmployee.
+    // If oneToken is unavailable (e.g. first request before re-login), fall back to token.
+    const employee = await getOrSyncEmployee(oneEmployeeId, oneToken || token);
+    if (!employee) {
+      return error(res, "Unauthorized: Employee profile not found", null, 401);
     }
 
-    const kpiRole = mapRole(userData.role || userData.RoleName);
-    
+    // --- Step 3: Build req.user from DB record ---
+    const roles   = Array.isArray(employee.roles)    ? employee.roles    : [];
+    const teamIds = Array.isArray(employee.team_ids) ? employee.team_ids : [];
+
+    // kpi_role is pre-derived and stored during sync. Recompute as safety fallback.
+    const kpiRole = employee.kpi_role || mapKpiRole(roles);
+
     req.user = {
-      ...userData,
-      kpiRole,
-      scope: getScope(kpiRole, userData),
-      token,
+      id:           String(employee.one_employee_id), // ONE CRM EmployeeID — identity
+      name:         employee.name,
+      kpiRole,                                        // "KPI Admin" | "KPI Manager" | "KPI Executive"
+      roles,                                          // [1] | [2] | [3] | [1,2] etc.
+      teamIds,                                        // [9, 29]
+      franchiseeId: employee.franchisee_id || null,
+      scope:        getScope(kpiRole, { id: String(employee.one_employee_id), teamIds }),
+      token,                                          // KPI token — for internal KPI auth only
+      oneToken,                                       // ONE CRM token — for proxying ONE API calls
     };
+
+    console.log(
+      `🔐 Auth: id=${req.user.id} | ${kpiRole} | teams=[${teamIds}]`
+    );
 
     next();
   } catch (err) {
@@ -122,7 +133,7 @@ export const authenticate = async (req, res, next) => {
  */
 export const authorize = (...allowedRoles) => {
   return (req, res, next) => {
-    if (!req.user || !req.user.kpiRole) {
+    if (!req.user?.kpiRole) {
       return error(res, "Unauthorized: No role found on request", null, 401);
     }
 
@@ -137,6 +148,7 @@ export const authorize = (...allowedRoles) => {
         403,
       );
     }
+
     next();
   };
 };

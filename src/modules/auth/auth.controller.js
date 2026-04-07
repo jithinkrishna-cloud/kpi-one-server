@@ -8,27 +8,6 @@ import {
 import { signKpiToken } from "./auth.service.js";
 
 /**
- * Maps raw ONE CRM role names → KPI module role names.
- * Single source of truth — keep in sync with auth.middleware.js and authMiddleware.js.
- */
-const mapKpiRole = (oneRole) => {
-  const map = {
-    "Admin":                 "KPI Admin",
-    "Bizpole Admin":         "KPI Admin",
-    "Super Admin":           "KPI Admin",
-    "Manager":               "KPI Manager",
-    "Team Lead":             "KPI Manager",
-    "Sales TL":              "KPI Manager",
-    "Franchisee":            "KPI Franchisee",
-    "Franchisee Admin":      "KPI Franchisee",
-    "BDE":                   "KPI Executive",
-    "CRE":                   "KPI Executive",
-    "Operations Executive":  "KPI Executive",
-  };
-  return map[oneRole] || "KPI Executive";
-};
-
-/**
  * Secure Auth Proxy for BIZPOLE ONE CRM
  * Delegates login directly to the main platform via its API.
  * Maps role and creates a local KPI module session.
@@ -53,33 +32,37 @@ export const login = async (req, res) => {
       throw new Error("Invalid response from ONE CRM: user or token missing");
     }
 
-    // 🚀 SYNC: Hydrate local cache and get KPI metadata
-    const localUser = await syncFromLoginResponse(user);
+    // 🚀 SYNC: Persist all franchise roles + teams to the local cache
+    // syncFromLoginResponse processes ALL franchiseeRoles entries so the DB row
+    // has: one_employee_id (CRM id), roles (RoleTypeIds), team_ids, kpi_role, franchisee_id
+    // Pass oneToken so it's stored in the DB cache for outgoing ONE CRM API calls
+    const localUser = await syncFromLoginResponse(user, oneToken);
     if (!localUser) {
       throw new Error("Failed to sync user profile from ONE CRM response");
     }
 
     // 🏷️ SESSION: Create a dedicated KPI module token (Stateless JWT)
-    // Store the MAPPED kpiRole ("KPI Admin", "KPI Manager", etc.) in the token
-    // so authorize() guards work correctly without re-mapping on every request.
-    const kpiToken = signKpiToken({
-      ...localUser,
-      kpiRole: mapKpiRole(localUser.role),
-    });
+    // signKpiToken reads one_employee_id (not the internal DB id), kpi_role, team_ids.
+    // No role re-mapping needed here — kpi_role is already correct in localUser.
+    const kpiToken = signKpiToken(localUser);
 
-    // 🍪 SET COOKIE: Store the local KPI token securely
-    res.cookie("token", kpiToken, {
+    // 🍪 SET COOKIES
+    // `token`     — KPI module JWT (signed with KPI_JWT_SECRET), used by this backend for auth
+    // `one_token` — Original ONE CRM token (signed with ONE_JWT_SECRET), used to proxy ONE CRM API calls
+    const cookieOpts = {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure:   process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+      maxAge:   7 * 24 * 60 * 60 * 1000, // 7 days
+    };
+    res.cookie("token",     kpiToken, cookieOpts);
+    res.cookie("one_token", oneToken, cookieOpts);
 
     // Return the combined identity to the client
     return res.status(response.status).json({
       ...response.data,
-      kpiToken, // Expose for testing if needed
-      role: localUser.role,
+      kpiToken,
+      kpiRole: localUser.kpi_role,
     });
   } catch (err) {
     // err.response exists  → axios error from ONE CRM (wrong credentials, network, etc.)
@@ -95,12 +78,13 @@ export const login = async (req, res) => {
  * Logout - Clears the authentication token cookie.
  */
 export const logout = (req, res) => {
-  res.clearCookie("token", {
+  const cookieOpts = {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure:   process.env.NODE_ENV === "production",
     sameSite: "strict",
-  });
-
+  };
+  res.clearCookie("token",     cookieOpts);
+  res.clearCookie("one_token", cookieOpts);
   return success(res, "Logout successful");
 };
 
@@ -136,11 +120,11 @@ export const getOrgContext = async (req, res) => {
     ]);
 
     return success(res, "Organizational context retrieved", {
-      teams: teams || [],
+      teams:     teams     || [],
       employees: employees || [],
       scope: {
-        currentRole: req.user.role,
-        teamId: req.user.teamId,
+        kpiRole:      req.user.kpiRole,
+        teamIds:      req.user.teamIds,
         franchiseeId: req.user.franchiseeId,
       },
     });

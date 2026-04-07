@@ -1,4 +1,4 @@
-import { refreshCache, listEmployees } from './employee.service.js';
+import { refreshCache, listEmployees, getTeamsByManagerId, getEmployeesByManagerId } from './employee.service.js';
 import { success, error } from '../../shared/utils/response.js';
 
 /**
@@ -40,5 +40,35 @@ export const getEmployees = async (req, res) => {
     return success(res, 'Employees retrieved successfully', employees);
   } catch (err) {
     return error(res, err.message, null, 500);
+  }
+};
+
+/**
+ * GET /employees/manager/:managerId/teams
+ * Returns all team IDs the given manager belongs to.
+ * Admin: can query any manager.
+ * Manager: can only query themselves.
+ */
+export const getManagerTeams = async (req, res) => {
+  try {
+    const teamIds = await getTeamsByManagerId(req.params.managerId, req.user);
+    return success(res, 'Teams retrieved successfully', { managerId: req.params.managerId, teamIds });
+  } catch (err) {
+    return error(res, err.message, null, err.status || 500);
+  }
+};
+
+/**
+ * GET /employees/manager/:managerId/employees
+ * Returns all employees across every team the given manager belongs to.
+ * Admin: can query any manager.
+ * Manager: can only query themselves.
+ */
+export const getManagerEmployees = async (req, res) => {
+  try {
+    const employees = await getEmployeesByManagerId(req.params.managerId, req.user);
+    return success(res, 'Employees retrieved successfully', { managerId: req.params.managerId, employees });
+  } catch (err) {
+    return error(res, err.message, null, err.status || 500);
   }
 };

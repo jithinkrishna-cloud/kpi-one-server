@@ -7,14 +7,16 @@ import jwt from "jsonwebtoken";
  * @returns {string} Signed JWT
  */
 export const signKpiToken = (user) => {
+  // IDENTITY: Always use ONE CRM EmployeeID — never the internal DB auto-increment id.
+  // DB row has `one_employee_id` (CRM id) and `id` (internal pk).
+  // signKpiToken receives either a raw DB row or a shaped object from the controller.
   const payload = {
-    id: user.id || user.one_employee_id,
-    name: user.name,
-    role: user.role, // Legacy fallback
-    kpiRole: user.kpiRole || user.role, // Standardized for RoleGuard
-    teamId: user.teamId || user.team_id,
-    franchiseeId: user.franchiseeId || user.franchisee_id,
-    scope: user.scope,
+    id:           user.one_employee_id || user.id,          // ONE CRM EmployeeID (e.g. 200)
+    name:         user.name,
+    kpiRole:      user.kpiRole || user.kpi_role,            // derived role string
+    roles:        user.roles         || [],                 // RoleTypeIds e.g. [2]
+    teamIds:      user.teamIds       || user.team_ids || [], // all TeamIDs e.g. [9, 29]
+    franchiseeId: user.franchiseeId  || user.franchisee_id || null,
   };
 
   const secret = process.env.KPI_JWT_SECRET;
