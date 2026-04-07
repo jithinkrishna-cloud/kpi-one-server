@@ -4,6 +4,7 @@ import targetsRoutes from "./targets/targets.routes.js";
 import actualsRoutes from "./actuals/actuals.routes.js";
 import incentivesRoutes from "./incentives/incentives.routes.js";
 import dashboardRoutes from "./dashboards/dashboard.routes.js";
+import franchiseeTargetsRoutes from "./franchisee-targets/franchisee-targets.routes.js";
 
 const router = express.Router();
 
@@ -17,5 +18,6 @@ router.use("/targets", targetsRoutes);
 router.use("/actuals", actualsRoutes);
 router.use("/incentives", incentivesRoutes);
 router.use("/dashboard", dashboardRoutes);
+router.use("/franchisee-targets", franchiseeTargetsRoutes);
 
 export default router;

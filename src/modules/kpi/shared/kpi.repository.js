@@ -215,6 +215,72 @@ export const getTeamMembersTargetsSum = async (teamId, periodId, kpiCode, connec
     return rows[0]?.total_sum || 0;
 };
 
+// --- Franchisee Targets ---
+
+/**
+ * SUM of all team final_values under a franchisee for a given period + KPI.
+ * Joins kpi_team_targets → one_employee_cache to resolve team membership.
+ */
+export const getFranchiseeTeamTargetsSum = async (franchiseeId, periodId, kpiCode, connection = null) => {
+    const db = connection || getPool();
+    const [rows] = await db.query(`
+        SELECT COALESCE(SUM(ktt.final_value), 0) AS total_sum
+        FROM kpi_team_targets ktt
+        JOIN (
+            SELECT DISTINCT team_id
+            FROM one_employee_cache
+            WHERE franchisee_id = ?
+              AND team_id IS NOT NULL
+        ) ft ON ktt.team_id = ft.team_id
+        WHERE ktt.period_id = ?
+          AND ktt.kpi_code  = ?
+    `, [franchiseeId, periodId, kpiCode]);
+    return rows[0]?.total_sum || 0;
+};
+
+export const upsertFranchiseeTarget = async (ft, connection = null) => {
+    const db = connection || getPool();
+    const { franchisee_id, period_id, kpi_code, auto_sum, override_value, override_by, override_reason, revision_history } = ft;
+
+    const [result] = await db.query(`
+        INSERT INTO kpi_franchisee_targets
+            (franchisee_id, period_id, kpi_code, auto_sum, override_value, override_by, override_reason, final_value, revision_history)
+        VALUES (?, ?, ?, ?, ?, ?, ?,
+            CASE WHEN ? IS NOT NULL THEN ? ELSE ? END,
+        ?)
+        ON DUPLICATE KEY UPDATE
+            auto_sum        = VALUES(auto_sum),
+            override_value  = VALUES(override_value),
+            override_by     = VALUES(override_by),
+            override_reason = VALUES(override_reason),
+            final_value     = CASE
+                                WHEN VALUES(override_value) IS NOT NULL THEN VALUES(override_value)
+                                ELSE VALUES(auto_sum)
+                              END,
+            revision_history = IFNULL(VALUES(revision_history), revision_history)
+    `, [
+        franchisee_id, period_id, kpi_code,
+        auto_sum, override_value, override_by, override_reason,
+        override_value, override_value, auto_sum,
+        JSON.stringify(revision_history)
+    ]);
+    return result;
+};
+
+export const getFranchiseeTargetsByPeriod = async (franchiseeId, periodId, connection = null) => {
+    const db = connection || getPool();
+    const [rows] = await db.query(
+        'SELECT * FROM kpi_franchisee_targets WHERE franchisee_id = ? AND period_id = ?',
+        [franchiseeId, periodId]
+    );
+    return rows.map(r => ({
+        ...r,
+        revision_history: r.revision_history
+            ? (typeof r.revision_history === 'string' ? JSON.parse(r.revision_history) : r.revision_history)
+            : [],
+    }));
+};
+
 // --- Audit Logging ---
 
 export const logKpiAudit = async (audit, connection = null) => {
@@ -237,7 +303,7 @@ export const logKpiAudit = async (audit, connection = null) => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `, [
         entity_type, 
-        entity_type === 'target' ? 'kpi_targets' : (entity_type === 'period' ? 'kpi_periods' : 'kpi_team_targets'),
+        ({ target: 'kpi_targets', period: 'kpi_periods', team_target: 'kpi_team_targets', franchisee_target: 'kpi_franchisee_targets' })[entity_type] || 'kpi_audit_log',
         record_id, action, 
         old_value ? JSON.stringify(old_value) : null, 
         JSON.stringify(diff), 

@@ -138,10 +138,11 @@ export const PERIOD_STATUS = {
 };
 
 export const AUDIT_ENTITY_TYPES = {
-  PERIOD: "period",
-  TARGET: "target",
-  TEAM_TARGET: "team_target",
-  ACTUAL: "actual",
+  PERIOD:             "period",
+  TARGET:             "target",
+  TEAM_TARGET:        "team_target",
+  FRANCHISEE_TARGET:  "franchisee_target",
+  ACTUAL:             "actual",
 };
 
 export const INCENTIVE_STATUS = {

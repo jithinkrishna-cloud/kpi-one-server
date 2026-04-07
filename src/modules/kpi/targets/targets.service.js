@@ -162,7 +162,17 @@ export const syncTeamTarget = async (
   };
 
   // 3. Atomic Upsert (CASE logic is inside repository.upsertTeamTarget)
-  return await repository.upsertTeamTarget(teamTarget, db);
+  await repository.upsertTeamTarget(teamTarget, db);
+
+  // 4. Bubble up — sync franchisee target from updated team totals
+  const [teamRow] = await db.query(
+    "SELECT franchisee_id FROM one_employee_cache WHERE team_id = ? AND franchisee_id IS NOT NULL LIMIT 1",
+    [teamId],
+  );
+  const franchiseeId = teamRow[0]?.franchisee_id;
+  if (franchiseeId) {
+    await syncFranchiseeTarget(franchiseeId, periodId, kpiCode, db);
+  }
 };
 
 export const overrideTeamTarget = async (
@@ -353,4 +363,167 @@ export const setBulkTargets = async (targets, currentUser) => {
       period_id: periodId,
     };
   });
+};
+
+// ---------------------------------------------------------------------------
+// Franchisee Target — F12-A
+// ---------------------------------------------------------------------------
+
+/**
+ * Recalculates the franchisee target auto_sum from all team final_values.
+ * Preserves any existing override. Called automatically from syncTeamTarget.
+ */
+export const syncFranchiseeTarget = async (franchiseeId, periodId, kpiCode, connection = null) => {
+  const db = connection || repository.getPool();
+
+  const autoSum = await repository.getFranchiseeTeamTargetsSum(
+    franchiseeId, periodId, kpiCode, db,
+  );
+
+  const existing = await repository.getFranchiseeTargetsByPeriod(franchiseeId, periodId, db);
+  const prev = existing.find((r) => r.kpi_code === kpiCode);
+
+  return await repository.upsertFranchiseeTarget({
+    franchisee_id:   franchiseeId,
+    period_id:       periodId,
+    kpi_code:        kpiCode,
+    auto_sum:        autoSum,
+    override_value:  prev?.override_value  ?? null,
+    override_by:     prev?.override_by     ?? null,
+    override_reason: prev?.override_reason ?? null,
+    revision_history: prev?.revision_history ?? [],
+  }, db);
+};
+
+/**
+ * Admin overrides a franchisee target. Reason is mandatory.
+ * auto_sum is preserved; final_value becomes override_value.
+ */
+export const overrideFranchiseeTarget = async (
+  franchiseeId, periodId, kpiCode, overrideValue, currentUser, reason,
+) => {
+  const { id: userId } = currentUser;
+
+  if (!reason || !String(reason).trim()) {
+    throw new Error("A reason for override is mandatory.");
+  }
+  if (overrideValue === null || overrideValue === undefined || isNaN(overrideValue)) {
+    throw new Error("overrideValue must be a valid number.");
+  }
+
+  return await repository.withTransaction(async (connection) => {
+    const period = await repository.lockPeriodForUpdate(connection, periodId);
+    if (!period) throw new Error("Period not found.");
+    if (period.status === "closed" || period.status === "rejected" || period.is_frozen) {
+      throw new Error("Cannot override targets for a closed/rejected/frozen period.");
+    }
+
+    const autoSum = await repository.getFranchiseeTeamTargetsSum(
+      franchiseeId, periodId, kpiCode, connection,
+    );
+    const existing = await repository.getFranchiseeTargetsByPeriod(franchiseeId, periodId, connection);
+    const prev = existing.find((r) => r.kpi_code === kpiCode);
+
+    const revision = {
+      timestamp:    new Date().toISOString(),
+      action:       "override",
+      old_override: prev?.override_value ?? null,
+      new_override: overrideValue,
+      reason,
+      updated_by:   userId,
+    };
+
+    const result = await repository.upsertFranchiseeTarget({
+      franchisee_id:   franchiseeId,
+      period_id:       periodId,
+      kpi_code:        kpiCode,
+      auto_sum:        autoSum,
+      override_value:  overrideValue,
+      override_by:     userId,
+      override_reason: reason,
+      revision_history: prev ? [...prev.revision_history, revision] : [revision],
+    }, connection);
+
+    await repository.logKpiAudit({
+      entity_type:  AUDIT_ENTITY_TYPES.FRANCHISEE_TARGET,
+      record_id:    prev?.id ?? result.insertId ?? 0,
+      action:       "override",
+      old_value:    { override: prev?.override_value ?? null },
+      new_value:    { override: overrideValue },
+      reason,
+      performed_by: userId,
+    }, connection);
+
+    const updated = await repository.getFranchiseeTargetsByPeriod(franchiseeId, periodId, connection);
+    return updated.find((r) => r.kpi_code === kpiCode);
+  });
+};
+
+/**
+ * Admin resets a franchisee override — final_value reverts to auto_sum.
+ * Reason is still mandatory (the reset is auditable).
+ */
+export const resetFranchiseeOverride = async (
+  franchiseeId, periodId, kpiCode, currentUser, reason,
+) => {
+  const { id: userId } = currentUser;
+
+  if (!reason || !String(reason).trim()) {
+    throw new Error("A reason for resetting the override is mandatory.");
+  }
+
+  return await repository.withTransaction(async (connection) => {
+    const period = await repository.lockPeriodForUpdate(connection, periodId);
+    if (!period) throw new Error("Period not found.");
+    if (period.status === "closed" || period.status === "rejected" || period.is_frozen) {
+      throw new Error("Cannot reset override for a closed/rejected/frozen period.");
+    }
+
+    const existing = await repository.getFranchiseeTargetsByPeriod(franchiseeId, periodId, connection);
+    const prev = existing.find((r) => r.kpi_code === kpiCode);
+    if (!prev?.override_value) {
+      throw new Error("No active override found for this franchisee target.");
+    }
+
+    const autoSum = await repository.getFranchiseeTeamTargetsSum(
+      franchiseeId, periodId, kpiCode, connection,
+    );
+
+    const revision = {
+      timestamp:    new Date().toISOString(),
+      action:       "reset",
+      old_override: prev.override_value,
+      new_override: null,
+      reason,
+      updated_by:   userId,
+    };
+
+    const result = await repository.upsertFranchiseeTarget({
+      franchisee_id:   franchiseeId,
+      period_id:       periodId,
+      kpi_code:        kpiCode,
+      auto_sum:        autoSum,
+      override_value:  null,
+      override_by:     null,
+      override_reason: null,
+      revision_history: [...prev.revision_history, revision],
+    }, connection);
+
+    await repository.logKpiAudit({
+      entity_type:  AUDIT_ENTITY_TYPES.FRANCHISEE_TARGET,
+      record_id:    prev.id,
+      action:       "reset",
+      old_value:    { override: prev.override_value },
+      new_value:    { override: null },
+      reason,
+      performed_by: userId,
+    }, connection);
+
+    const updated = await repository.getFranchiseeTargetsByPeriod(franchiseeId, periodId, connection);
+    return updated.find((r) => r.kpi_code === kpiCode);
+  });
+};
+
+export const getFranchiseeTargets = async (franchiseeId, periodId) => {
+  return await repository.getFranchiseeTargetsByPeriod(franchiseeId, periodId);
 };
