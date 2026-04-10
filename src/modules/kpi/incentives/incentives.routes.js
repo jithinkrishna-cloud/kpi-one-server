@@ -93,6 +93,14 @@ router.get(
     controller.getResults          // all roles can view results
 );
 
+// Admin reset: clears calculated results so Manager can recalculate (blocked if approved)
+router.post(
+    "/results/:executiveId/:periodId/reset",
+    authenticate,
+    authorize("KPI Admin"),
+    controller.resetCalculation
+);
+
 router.post(
     "/payout/:executiveId/:periodId/approve",
     authenticate,

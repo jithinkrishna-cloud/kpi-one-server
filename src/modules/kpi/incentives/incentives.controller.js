@@ -129,7 +129,7 @@ export const calculateIncentive = async (req, res) => {
 
     try {
         const result = await service.calculatePeriod(executiveId, periodId, req.user.id);
-        return success(res, "Incentive calculation complete. Results are now locked.", result);
+        return success(res, "Incentive calculation complete. Pending Admin payout approval.", result);
     } catch (err) {
         const status = err.message.includes("locked") ? 409
             : err.message.includes("Missing") || err.message.includes("active") ? 422
@@ -184,6 +184,25 @@ export const approvePayout = async (req, res) => {
         return success(res, result.message, { grand_total: result.grand_total });
     } catch (err) {
         return error(res, err.message, null, err.message.includes("already") ? 409 : 500);
+    }
+};
+
+/**
+ * POST /kpi/incentives/results/:executiveId/:periodId/reset
+ * Admin resets a calculated (not yet approved) incentive so Manager can recalculate.
+ * PRD: "Any recalculation should require explicit reset / admin override."
+ * Body: { reason }
+ */
+export const resetCalculation = async (req, res) => {
+    const { executiveId, periodId } = req.params;
+    const { reason }                = req.body;
+    if (!reason) return error(res, "Reset reason is required.", null, 400);
+
+    try {
+        const result = await service.resetCalculation(executiveId, periodId, req.user.id, reason);
+        return success(res, result.message);
+    } catch (err) {
+        return error(res, err.message, null, err.message.includes("approved") ? 409 : 500);
     }
 };
 

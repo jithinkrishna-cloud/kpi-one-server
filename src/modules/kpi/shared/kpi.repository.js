@@ -720,6 +720,30 @@ export const isIncentiveLocked = async (executiveId, periodId, connection = null
     return rows[0].cnt > 0;
 };
 
+/**
+ * Delete all incentive result rows for an executive/period.
+ * Used by admin reset flow — only when payout is NOT yet approved.
+ */
+export const deleteIncentiveResults = async (executiveId, periodId, connection = null) => {
+    const db = connection || getPool();
+    await db.query(
+        "DELETE FROM kpi_incentive_results WHERE executive_id = ? AND period_id = ?",
+        [executiveId, periodId]
+    );
+};
+
+/**
+ * Delete the payout summary row for an executive/period.
+ * Used by admin reset flow — only when payout is NOT yet approved.
+ */
+export const deletePayoutSummary = async (executiveId, periodId, connection = null) => {
+    const db = connection || getPool();
+    await db.query(
+        "DELETE FROM kpi_payout_summary WHERE executive_id = ? AND period_id = ?",
+        [executiveId, periodId]
+    );
+};
+
 // --- F12-C: Payout Summary ---
 
 export const getPayoutSummary = async (executiveId, periodId, connection = null) => {

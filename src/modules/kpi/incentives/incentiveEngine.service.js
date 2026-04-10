@@ -82,11 +82,11 @@ const assertActualsComplete = async (executiveId, period) => {
  * @returns {PayoutResult}
  */
 export const calculatePeriodIncentive = async (executiveId, periodId, calculatedBy) => {
-    // ── Guard: already locked ─────────────────────────────────────────────────
-    const locked = await repository.isIncentiveLocked(executiveId, periodId);
-    if (locked) {
+    // ── Guard: payout already approved (permanently locked) ───────────────────
+    const existingSummary = await repository.getPayoutSummary(executiveId, periodId);
+    if (existingSummary?.status === "approved") {
         throw new Error(
-            "Incentive results are already locked for this period. No recalculation allowed."
+            "Incentive payout is already approved and locked. Admin must reset before recalculation."
         );
     }
 
@@ -192,10 +192,9 @@ export const calculatePeriodIncentive = async (executiveId, periodId, calculated
         });
     }
 
-    // ── Lock all results ──────────────────────────────────────────────────────
-    await repository.lockIncentiveResults(executiveId, periodId);
-
     // ── Payout Summary ────────────────────────────────────────────────────────
+    // NOTE: Results are NOT locked here. Locking happens in approvePayout()
+    //       per PRD: Draft → Calculated → Approved → Locked.
     const totalCommission = kpiResults.reduce((s, r) => s + r.commission,  0);
     const totalSlabBonus  = kpiResults.reduce((s, r) => s + r.slab_bonus,  0);
     const grandTotal = parseFloat(
@@ -245,7 +244,7 @@ export const calculatePeriodIncentive = async (executiveId, periodId, calculated
             grand_total:       grandTotal,
         },
         status: "calculated",
-        locked: true,
+        locked: false,
     };
 };
 

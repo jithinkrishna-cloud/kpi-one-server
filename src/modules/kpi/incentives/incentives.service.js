@@ -192,6 +192,8 @@ export const approvePayout = async (executiveId, periodId, approvedBy) => {
     }
 
     await repository.approvePayoutSummary(executiveId, periodId, approvedBy);
+    // PRD: lock results AFTER approval, not after calculation
+    await repository.lockIncentiveResults(executiveId, periodId);
 
     await repository.logKpiAudit({
         entity_type:  "period",
@@ -238,4 +240,35 @@ export const rejectPayout = async (executiveId, periodId, rejectedBy, reason) =>
  */
 export const getAllPayouts = async (periodId) => {
     return await repository.getAllPayoutsByPeriod(periodId);
+};
+
+/**
+ * Admin resets a calculated (not yet approved) incentive so Manager can recalculate.
+ * PRD: "Any recalculation should require explicit reset / admin override."
+ * Blocked if payout is already approved (permanently locked).
+ */
+export const resetCalculation = async (executiveId, periodId, resetBy, reason) => {
+    if (!reason) throw new Error("Reset reason is mandatory.");
+
+    const summary = await repository.getPayoutSummary(executiveId, periodId);
+    if (summary?.status === "approved") {
+        throw new Error("Payout is already approved and permanently locked. Cannot reset.");
+    }
+
+    await Promise.all([
+        repository.deleteIncentiveResults(executiveId, periodId),
+        repository.deletePayoutSummary(executiveId, periodId),
+    ]);
+
+    await repository.logKpiAudit({
+        entity_type:  "period",
+        record_id:    periodId,
+        action:       "reset",
+        old_value:    { status: summary?.status || "none" },
+        new_value:    { status: "reset", executive_id: executiveId },
+        reason,
+        performed_by: resetBy,
+    });
+
+    return { message: "Incentive calculation reset. Manager can now recalculate." };
 };
