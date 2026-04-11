@@ -97,9 +97,9 @@ export const getMe = (req, res) => {
     return error(res, "User identity not found in context", null, 404);
   }
 
-  return success(res, "User profile retrieved", {
-    user: req.user,
-  });
+  // Omit token/oneToken — they live in httpOnly cookies, no need to expose in body
+  const { token, oneToken, ...safeUser } = req.user;
+  return success(res, "User profile retrieved", { user: safeUser });
 };
 
 /**
