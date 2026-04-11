@@ -9,6 +9,8 @@ import {
 import {
   getTeams,
   getRolesAll,
+  getFranchiseeIdNames,
+  getTeamIdNames,
 } from "../../shared/integrations/oneApi.service.js";
 import {
   mapKpiRole,
@@ -363,5 +365,55 @@ export const listEmployees = async (query = {}, currentUser) => {
     filters.teamIds = currentUser.teamIds || [];
   }
 
-  return await findAll(filters);
+  const rawEmployees = await findAll(filters);
+
+  // If the user is specifically looking for Executives, ensure we don't return Admins.
+  // PRD: "in executive it show admin" — fixing oversight where KPI Admin was included in general lists.
+  let employees = rawEmployees;
+  if (query.role === "KPI Executive") {
+    employees = rawEmployees.filter((e) => e.kpi_role === "KPI Executive");
+  } else if (!query.role) {
+    // Optional: If no role is specified, maybe we filter by default? 
+    // For now, only filter if "KPI Executive" is explicitly requested.
+  }
+
+  // --- Enrich with names from Bizpole-One-Server ---
+  try {
+    const token = await resolveCrmToken(currentUser, currentUser.one_employee_id || currentUser.id);
+    if (!token) return employees;
+
+    const [franchiseesResp, teamsResp] = await Promise.all([
+      getFranchiseeIdNames(token).catch(() => ({ data: [] })),
+      getTeamIdNames(token).catch(() => ({ data: [] })),
+    ]);
+
+    const franchiseeMap = {};
+    const fList = Array.isArray(franchiseesResp?.data) ? franchiseesResp.data : (Array.isArray(franchiseesResp) ? franchiseesResp : []);
+    fList.forEach((f) => {
+      const fid = f.FranchiseeID || f.franchiseeId || f.id;
+      const fname = f.FranchiseeName || f.franchiseeName || f.name;
+      if (fid) franchiseeMap[String(fid)] = fname;
+    });
+
+    const teamMap = {};
+    const tList = Array.isArray(teamsResp?.data) ? teamsResp.data : (Array.isArray(teamsResp) ? teamsResp : []);
+    tList.forEach((t) => {
+      const tid = t.TeamID || t.teamId || t.id;
+      const tname = t.TeamName || t.teamName || t.name;
+      if (tid) teamMap[String(tid)] = tname;
+    });
+
+    return employees.map((emp) => {
+      const team_names = (emp.team_ids || []).map((tid) => teamMap[String(tid)] || `Team ${tid}`);
+      return {
+        ...emp,
+        franchisee_name: emp.franchisee_id ? (franchiseeMap[String(emp.franchisee_id)] || `Franchisee ${emp.franchisee_id}`) : null,
+        team_name:       emp.team_id ? (teamMap[String(emp.team_id)] || `Team ${emp.team_id}`) : null,
+        team_names,
+      };
+    });
+  } catch (err) {
+    console.warn("⚠️  Enrichment failed (returning raw IDs):", err.message);
+    return employees;
+  }
 };

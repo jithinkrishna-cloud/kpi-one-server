@@ -30,9 +30,13 @@ const ENDPOINTS = {
   ORDERS: "/orderlist",
   ORDER_METRICS: "/ordermetrics",
 
-  // Activity Feed
+  // Engagement/Communications
   CALLYSER: "/callyser/calls",
   INTERAKT: "/interakt/messages",
+
+  // Metadata Lookups
+  FRANCHISEE_ID_NAME: "/franchisees/id-name",
+  TEAM_ID_NAME: "/getActiveTeamIdsAndNames",
 };
 
 /**
@@ -142,3 +146,10 @@ export const getCallLogs = (params, token) =>
 
 export const getMessageLogs = (params, token) =>
   oneApiRequest(ENDPOINTS.INTERAKT, { method: "GET", params }, token);
+
+// Metadata Lookups
+export const getFranchiseeIdNames = (token) =>
+  oneApiRequest(ENDPOINTS.FRANCHISEE_ID_NAME, { method: "GET" }, token);
+
+export const getTeamIdNames = (token) =>
+  oneApiRequest(ENDPOINTS.TEAM_ID_NAME, { method: "GET" }, token);

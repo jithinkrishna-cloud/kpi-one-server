@@ -44,16 +44,34 @@ const authMiddleware = async (req, res, next) => {
       );
     }
 
-    // --- STEP 2: Verify JWT locally using shared ONE secret ---
+    // --- STEP 2: Verify JWT — try KPI secret first, fall back to ONE secret ---
     let userId;
     try {
-      const secret = process.env.ONE_JWT_SECRET;
-      if (!secret) throw new Error("ONE_JWT_SECRET is not configured");
+      const kpiSecret = process.env.KPI_JWT_SECRET;
+      const oneSecret = process.env.ONE_JWT_SECRET;
 
-      const decoded = jwt.verify(token, secret);
+      let decoded = null;
 
-      // ONE CRM tokens may use userId, id, or _id
-      userId = decoded.userId || decoded.id || decoded._id;
+      // Prefer KPI token (issued by this backend at login)
+      if (kpiSecret) {
+        try {
+          decoded = jwt.verify(token, kpiSecret);
+        } catch (_) {
+          // Not a KPI token — try ONE CRM token next
+        }
+      }
+
+      // Fallback: ONE CRM token (used for direct API proxying)
+      if (!decoded && oneSecret) {
+        decoded = jwt.verify(token, oneSecret);
+      }
+
+      if (!decoded) {
+        throw new Error("Token could not be verified with any known secret");
+      }
+
+      // KPI tokens use `id`; ONE CRM tokens may use userId, id, or _id
+      userId = decoded.id || decoded.userId || decoded._id;
 
       if (!userId) {
         return error(
